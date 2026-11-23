@@ -1,0 +1,64 @@
+#!/bin/bash
+set -euo pipefail
+trap 'exit 130' INT TERM
+trap 'exit 129' HUP
+
+self="$0"
+while [ -L "$self" ]; do
+  link="$(readlink "$self")"
+  case "$link" in
+    /*) self="$link" ;;
+    *) self="$(dirname "$self")/$link" ;;
+  esac
+done
+engine_root="$(cd "$(dirname "$self")/.." >/dev/null && pwd)"
+jig_name="jig"
+. "$engine_root/lib/common.sh"
+. "$engine_root/lib/profile.sh"
+
+usage() {
+  echo "usage: jig run <plan.md> [--repo <path>]" >&2
+  echo "       jig smoke [--repo <path>]" >&2
+  echo "  --repo <path>          the target repository (default: the git checkout of the current directory)" >&2
+  echo "  JIG_TIMEOUT=<minutes>  run: limit for the agent run (default 60)" >&2
+  echo "  JIG_HOME=<dir>         where run and smoke directories live (default ~/.jig)" >&2
+  echo "  CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (exactly one) authenticates the agent in run" >&2
+  exit 2
+}
+
+[ "$#" -ge 1 ] || usage
+command="$1"
+shift
+repo_arg=""
+repo_given=0
+positional=0
+plan=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo)
+      [ "$#" -ge 2 ] && [ "$repo_given" = 0 ] && [ -n "$2" ] || usage
+      repo_given=1
+      repo_arg="$2"
+      shift 2 ;;
+    -*) usage ;;
+    *)
+      positional=$(( positional + 1 ))
+      plan="$1"
+      shift ;;
+  esac
+done
+case "$command" in
+  run) [ "$positional" = 1 ] || usage ;;
+  smoke) [ "$positional" = 0 ] || usage ;;
+  *) usage ;;
+esac
+
+repo_dir="${repo_arg:-.}"
+[ -d "$repo_dir" ] || jig_fail "the repository directory does not exist: $repo_dir"
+repo_root="$(git -C "$repo_dir" rev-parse --show-toplevel 2>/dev/null)" ||
+  jig_fail "not a git checkout: $repo_dir (pass --repo <path>)"
+
+case "$command" in
+  run) . "$engine_root/lib/run.sh" ;;
+  smoke) . "$engine_root/lib/smoke.sh" ;;
+esac
