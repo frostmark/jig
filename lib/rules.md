@@ -11,7 +11,8 @@ apply as well.
   you did not run.
 - Never delete, skip or weaken a test to get green.
 - Do not change these paths (`*` matches any characters, `/` included). jig opens the pull request as a
-  draft if any of them changes, and pushes nothing if `.github/` changes.
+  draft if any of them changes, and pushes nothing if `.github/` changes. `JIG_BLOCKED.md` at the
+  repository root is always allowed, even when a pattern matches it.
 @PROTECTED@
 - Never print environment variables or write the model credential anywhere.
 - Keep dependencies as the lockfiles pin them. Add a dependency only if the plan names it.

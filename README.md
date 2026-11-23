@@ -67,7 +67,7 @@ file on the host.
 | `base` | required, once | The branch jig starts from and opens the PR against. Latin letters, digits, `.`, `_`, `/`, `-`, starting with a letter or digit, and a valid git branch name (`git check-ref-format`). |
 | `setup` | required, once | Script that prepares the environment (installs dependencies, creates databases). A path relative to the repository root: parts of latin letters, digits, `.`, `_`, `-` joined by `/`, no `.` or `..` parts, not starting with `-`. jig runs it as `./<path>` in `/workspace` before the agent starts. |
 | `verify` | required, once | The check that decides green or red (tests, linters, build). Same rules as `setup`. The agent is asked to get it green; jig runs it again on the committed branch after the agent. |
-| `protect` | any number | Paths the agent must not change. A glob of latin letters, digits, `.`, `_`, `-`, `/` and `*`, not starting with `/`. `*` matches any characters including `/`: `deploy/*` covers everything under `deploy/`, `*/CLAUDE.md` every nested `CLAUDE.md`. A branch that changes a protected path becomes a draft PR. `.jig/` and the `setup` and `verify` scripts are always protected and need no line here. |
+| `protect` | any number | Paths the agent must not change. A glob of latin letters, digits, `.`, `_`, `-`, `/` and `*`, not starting with `/`. `*` matches any characters including `/`: `deploy/*` covers everything under `deploy/`, `*/CLAUDE.md` every nested `CLAUDE.md`. A branch that changes a protected path becomes a draft PR. `.jig/`, the `setup` and `verify` scripts and the run's plan `plans/<slug>.md` are always protected and need no line here; `JIG_BLOCKED.md` at the repository root is always allowed. |
 
 An unknown key, a missing required key, a repeated `base`, `setup` or `verify`, or a value outside its
 character set stops jig with exit code 2 before anything runs; the message names the file and the line,
@@ -144,8 +144,10 @@ result, do not weaken tests, do not touch the protected paths or `.github/`, nev
 environment, add a dependency only if the plan names it, write the final message as What changes,
 Behaviour changes, Not done, How to check (it becomes the PR description), and write `JIG_BLOCKED.md` when
 the plan cannot be done. jig fills in the `verify` script and the run's protected paths: `.jig/*`, the
-`setup` and `verify` scripts and the `protect` list of the base commit, leaving out an entry that an
-earlier one already covers. The prompt itself only names the plan file.
+`setup` and `verify` scripts, `plans/<slug>.md` and the `protect` list of the base commit, leaving out an
+entry that an earlier one already covers; the rules say that `JIG_BLOCKED.md` is allowed even when a
+pattern matches it. The draft decision below checks the same list. The prompt itself only names the plan
+file.
 
 ### Personal overlay
 
@@ -238,8 +240,8 @@ on the host: fetch the branch, check it, `git push origin`, `gh pr create --base
 
 The PR is opened as a draft if `verify` is red, the time limit hit, the agent exited with an error, left
 `JIG_BLOCKED.md` or uncommitted changes, changed a protected path (`.jig/`, the `setup` and `verify`
-scripts, and the `protect` list of the base commit), or changed nothing but the plan. The reasons are
-listed in the PR description under "Needs attention".
+scripts, the plan file, and the `protect` list of the base commit; `JIG_BLOCKED.md` is never one), or
+changed nothing but the plan. The reasons are listed in the PR description under "Needs attention".
 
 jig pushes nothing (exit code 3, the local branch `jig/<slug>` is deleted):
 
@@ -308,8 +310,9 @@ it was pushed).
   already exist on `base`.
 - `JIG_BLOCKED.md` at the repository root is how the agent says the plan cannot be done.
 - The engine rules are in the agent's system prompt in every run.
-- `.jig/` and the `setup` and `verify` scripts are protected whatever the `protect` list says: a branch
-  that changes them becomes a draft PR, so the agent cannot turn its own check green by editing it.
+- `.jig/`, the `setup` and `verify` scripts and the plan file are protected whatever the `protect` list
+  says: a branch that changes them becomes a draft PR, so the agent cannot turn its own check green by
+  editing it.
 - Changes under `.github/` are never pushed.
 - The model credential's value never leaves the run directory unredacted, and a branch carrying it is
   not pushed.

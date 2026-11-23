@@ -318,13 +318,10 @@ protected_count=0
 beyond_plan=0
 while IFS= read -r -d '' f; do
   case "$f" in
-    "plans/$slug.md")
-      [ "$(g rev-parse "$tip:plans/$slug.md" 2>/dev/null || true)" = "$plan_blob" ] || protected="$protected- \`$f\` (the plan itself)
-"
-      continue ;;
-    JIG_BLOCKED.md) continue ;;
+    "plans/$slug.md") [ "$(g rev-parse "$tip:$f" 2>/dev/null || true)" != "$plan_blob" ] || continue ;;
+    JIG_BLOCKED.md) ;;
+    *) beyond_plan=1 ;;
   esac
-  beyond_plan=1
   if jig_protected "$f"; then
     protected_count=$(( protected_count + 1 ))
     [ "$protected_count" -gt "$list_max" ] || protected="$protected- \`$(printable "$f")\`

@@ -56,7 +56,8 @@ jig_harness_shadows() {
 
 jig_protected_list() {
   local entry pattern covered listed=()
-  for entry in ".jig/*" "$profile_setup" "$profile_verify" ${profile_protect[@]+"${profile_protect[@]}"}; do
+  jig_protected_patterns
+  for entry in "${protected_patterns[@]}"; do
     covered=0
     for pattern in ${listed[@]+"${listed[@]}"}; do
       if [[ $entry == $pattern ]]; then

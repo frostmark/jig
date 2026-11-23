@@ -98,6 +98,7 @@ equals "sources with an overlay" "$(jig_harness_sources)" "engine rules: $root/l
 overlay rules: $overlay/rules.md
 overlay plugin: $overlay/plugin"
 
+slug=add-health-check
 jig_parse_profile cfg <<<"base main
 setup .jig/setup
 verify bin/verify
@@ -110,6 +111,7 @@ protect */CLAUDE.md"
 equals "protected list: always-protected paths first, covered entries left out" "$(jig_protected_list)" \
   '  - `.jig/*`
   - `bin/verify`
+  - `plans/add-health-check.md`
   - `CLAUDE.md`
   - `deploy/*`
   - `*/CLAUDE.md`'
@@ -118,9 +120,9 @@ rules="$(jig_engine_rules)"
 checks=$(( checks + 1 ))
 [[ $rules == *'Run `./bin/verify` yourself'* ]] || fail "the engine rules name the verify command: $rules"
 checks=$(( checks + 1 ))
-[[ $rules == *'draft if any of them changes, and pushes nothing if `.github/` changes.
-  - `.jig/*`
-  - `bin/verify`'* ]] || fail "the engine rules list the protected paths under their rule: $rules"
+[[ $rules == *"
+$(jig_protected_list)
+"* ]] || fail "the engine rules carry the protected list: $rules"
 checks=$(( checks + 1 ))
 [[ $rules != *@VERIFY@* && $rules != *@PROTECTED@* ]] || fail "the engine rules keep a placeholder: $rules"
 checks=$(( checks + 1 ))
