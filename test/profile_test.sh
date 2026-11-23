@@ -357,6 +357,9 @@ printf 'x\n' >"$overlay/docker/entry.sh"
 chmod 000 "$overlay/docker/entry.sh"
 exits_2 "an overlay file is not readable" "the overlay file $overlay/docker/entry.sh must be a readable regular file" jig_find_overlay
 rm -f "$overlay/docker/entry.sh"
+mkfifo "$overlay/docker/entry.sh"
+exits_2 "an overlay file is a fifo" "the overlay file $overlay/docker/entry.sh must be a readable regular file" jig_find_overlay
+rm "$overlay/docker/entry.sh"
 : >"$overlay/docker/my notes.txt"
 exits_2 "an overlay file name with a space" "the overlay file $overlay/docker/my notes.txt must have a name of latin letters" jig_find_overlay
 rm -r "$JIG_PROFILES"
