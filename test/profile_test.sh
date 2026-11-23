@@ -145,6 +145,7 @@ protect deploy/?" "cfg:4: protect must be"
 refused "protect with a backslash" "$valid
 protect deploy\\*" "cfg:4: protect must be"
 
+slug=add-health-check
 jig_parse_profile cfg <<<"base main
 setup bin/setup
 verify scripts/verify"
@@ -153,6 +154,8 @@ protected ".jig/config"
 protected ".jig/docker/Dockerfile"
 protected "bin/setup"
 protected "scripts/verify"
+protected "plans/add-health-check.md"
+not_protected "plans/other.md"
 not_protected "CLAUDE.md"
 not_protected "jig/config"
 not_protected "app/.jig/config"
@@ -185,6 +188,12 @@ not_protected "docs/CLAUDE.md.bak"
 not_protected "config/secrets.yml"
 not_protected "web/.claude/settings.json"
 not_protected "yarn.lock.bak"
+
+jig_parse_profile cfg <<<"$valid
+protect *"
+
+not_protected "JIG_BLOCKED.md"
+protected "docs/JIG_BLOCKED.md"
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/jig-test.XXXXXX")" || exit 1
 trap 'rm -rf "$tmp"' EXIT

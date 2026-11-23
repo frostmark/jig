@@ -5,7 +5,8 @@ request on the target repository. Code enters the container as a clone and leave
 container gets no GitHub access and no secrets other than the model credential.
 
 jig is the engine. Each target repository describes its own environment in a profile, the `.jig/`
-directory (see [Repository profile](#repository-profile)).
+directory (see [Repository profile](#repository-profile)). What the agent is told comes from the
+repository's own instructions, the engine rules and your personal overlay (see [Harness](#harness)).
 
 ## Install
 
@@ -66,7 +67,7 @@ file on the host.
 | `base` | required, once | The branch jig starts from and opens the PR against. Latin letters, digits, `.`, `_`, `/`, `-`, starting with a letter or digit, and a valid git branch name (`git check-ref-format`). |
 | `setup` | required, once | Script that prepares the environment (installs dependencies, creates databases). A path relative to the repository root: parts of latin letters, digits, `.`, `_`, `-` joined by `/`, no `.` or `..` parts, not starting with `-`. jig runs it as `./<path>` in `/workspace` before the agent starts. |
 | `verify` | required, once | The check that decides green or red (tests, linters, build). Same rules as `setup`. The agent is asked to get it green; jig runs it again on the committed branch after the agent. |
-| `protect` | any number | Paths the agent must not change. A glob of latin letters, digits, `.`, `_`, `-`, `/` and `*`, not starting with `/`. `*` matches any characters including `/`: `deploy/*` covers everything under `deploy/`, `*/CLAUDE.md` every nested `CLAUDE.md`. A branch that changes a protected path becomes a draft PR. `.jig/` and the `setup` and `verify` scripts are always protected and need no line here. |
+| `protect` | any number | Paths the agent must not change. A glob of latin letters, digits, `.`, `_`, `-`, `/` and `*`, not starting with `/`. `*` matches any characters including `/`: `deploy/*` covers everything under `deploy/`, `*/CLAUDE.md` every nested `CLAUDE.md`. A branch that changes a protected path becomes a draft PR. `.jig/`, the `setup` and `verify` scripts and the run's plan `plans/<slug>.md` are always protected and need no line here; `JIG_BLOCKED.md` at the repository root is always allowed. |
 
 An unknown key, a missing required key, a repeated `base`, `setup` or `verify`, or a value outside its
 character set stops jig with exit code 2 before anything runs; the message names the file and the line,
@@ -119,9 +120,101 @@ services:
       - ${JIG_WORKSPACE:?JIG_WORKSPACE must point at the clone}:/workspace
 ```
 
+In `jig run` the `app` service also gets read-only mounts under `/jig` (see [Harness](#harness)) from a
+compose file jig adds after this one; keep that path free in the image.
+
 Other services (a database, a cache) are the profile's business. No ports need to reach the host. The
 compose file runs on the host's Docker, so whoever can merge into `base` decides what the containers get
 (mounts, privileges); review `.jig/` changes like CI changes.
+
+## Harness
+
+The harness is what the agent is told and can use: rules, skills, subagents, commands, hooks. In
+`jig run` it comes from three places, and all of them apply at once:
+
+1. The repository: `CLAUDE.md` and `.claude/` in the clone, loaded by Claude Code as in any checkout.
+2. The engine rules, `lib/rules.md` of jig.
+3. Your personal overlay, outside the repository: `rules.md` and `plugin/`.
+
+### Engine rules
+
+`lib/rules.md` is appended to the agent's system prompt in every run. It holds what jig relies on: commit
+on the current branch and push nothing, leave nothing uncommitted, run `verify` and report its real
+result, do not weaken tests, do not touch the protected paths or `.github/`, never print the
+environment, add a dependency only if the plan names it, write the final message as What changes,
+Behaviour changes, Not done, How to check (it becomes the PR description), and write `JIG_BLOCKED.md` when
+the plan cannot be done. jig fills in the `verify` script and the run's protected paths: `.jig/*`, the
+`setup` and `verify` scripts, `plans/<slug>.md` and the `protect` list of the base commit, leaving out an
+entry that an earlier one already covers; the rules say that `JIG_BLOCKED.md` is allowed even when a
+pattern matches it. The draft decision below checks the same list. The prompt itself only names the plan
+file.
+
+### Personal overlay
+
+The overlay holds harness you are trying out before it moves into the repository. Its root is
+`JIG_PROFILES` (an absolute path, `$JIG_HOME/profiles` by default, so `~/.jig/profiles`); keep it as a
+private git repository of its own. Each target repository has a directory `<owner>/<repo>/` there, named
+like its run directories (the GitHub owner and name as `gh repo view` reports them):
+
+```
+~/.jig/profiles/
+  acme/shop/
+    rules.md
+    plugin/
+      .claude-plugin/plugin.json   optional: {"name": "..."}
+      skills/<name>/SKILL.md
+      agents/<name>.md
+      commands/<name>.md
+      hooks/hooks.json
+```
+
+- `rules.md` is appended to the system prompt after the engine rules.
+- `plugin/` is one Claude Code plugin, loaded with `--plugin-dir`. Without `.claude-plugin/plugin.json`
+  the plugin is named `overlay`, so its skills and agents appear as `overlay:<name>`; a manifest's `name`
+  replaces that. Its hooks run as in any plugin, with `${CLAUDE_PLUGIN_ROOT}` set to `/jig/overlay`.
+  Claude Code skips a plugin whose manifest is not valid JSON without an error; the `plugins` field of
+  the `"subtype":"init"` line of `claude.log` lists the plugins that loaded.
+
+Both are optional: without the overlay directory, or without one of them, the run goes on with what
+there is. An `<owner>/<repo>` that is not a directory, a `rules.md` that is not a readable regular file
+or a `plugin` that is not a directory stops jig with exit code 2 before anything runs.
+
+jig writes `system-prompt.md` (the engine rules, then the overlay's `rules.md`) and
+`compose.harness.yml` into the run directory and passes that compose file after the profile's
+`compose.yml`, so the profile needs no change. It mounts `system-prompt.md` at `/jig/system-prompt.md`
+and `plugin/` at `/jig/overlay` in `app`, both read-only and outside `/workspace`, and starts the agent
+with `--append-system-prompt-file /jig/system-prompt.md` and, when there is a plugin,
+`--plugin-dir /jig/overlay`. The plugin directory is mounted as it is on disk, so edits to it during a
+run are visible in the container.
+
+### What wins
+
+The agent gets the repository's harness, the engine rules and the overlay together. In the system prompt
+the overlay's rules come after the engine rules. Plugin skills and agents carry the plugin's prefix, so
+an overlay skill named like one in the repository does not hide it: the agent sees both (`review` and
+`overlay:review`).
+
+Whole plugins are another matter. Claude Code tells plugins apart by the `name` in their manifest (an
+overlay plugin without one is `overlay`), and a plugin loaded with `--plugin-dir`, as the overlay plugin
+is, replaces an installed marketplace plugin or a skills-directory plugin
+(`.claude/skills/<dir>/.claude-plugin/plugin.json`) of the same name
+([name conflicts](https://code.claude.com/docs/en/plugins/loading#name-conflicts)). That is the case
+when a plugin moves from the overlay into the repository under the same name while the overlay still
+has it: the agent gets the overlay's copy and not the repository's. Remove the plugin from the overlay
+when it moves; jig does not compare plugin names.
+
+At start `jig run` prints where each item comes from and warns when an overlay skill or agent has the
+same name as one in the base commit's `.claude/skills/<name>/` or `.claude/agents/<name>.md`:
+
+```
+jig: engine rules: /opt/jig/lib/rules.md
+jig: overlay rules: none (no /home/you/.jig/profiles/acme/shop/rules.md)
+jig: overlay plugin: /home/you/.jig/profiles/acme/shop/plugin
+jig: WARNING: the overlay plugin's skill review has the same name as .claude/skills/review in the repository; the agent sees both
+```
+
+The PR description gets the same lines under "Harness" without host paths: the engine rules appear as
+`jig's lib/rules.md` and the overlay items under `$JIG_PROFILES/acme/shop/`.
 
 ## Plan
 
@@ -142,21 +235,24 @@ jig run ~/plans/add-health-check.md --repo ~/src/shop
 ```
 
 `--repo` defaults to the git checkout of the current directory. The plan path is relative to the
-current directory. `JIG_HOME` (an absolute path, `~/.jig` by default) holds run and smoke directories.
+current directory. `JIG_HOME` (an absolute path, `~/.jig` by default) holds run and smoke directories;
+`JIG_PROFILES` (an absolute path, `$JIG_HOME/profiles` by default) is the overlay root.
 
-What `jig run` does: precondition checks → the profile from `origin/<base>` → a clone of that commit in
-`$JIG_HOME/runs/<owner>/<repo>/<slug>/repo` → compose project `jig-run_<owner>_<repo>_<slug>` (no ports
-on the host; owner and repo lowercased, characters other than latin letters, digits and `-` turned into
-`-`) → the plan commit and `setup` in the container → `claude -p` under the time limit → the branch
-leaves the container as a bundle → uncommitted changes are discarded (`git checkout -f`, `git clean -fd`,
-also in the middle of an abandoned merge or rebase) and `verify` runs on the committed branch →
-`docker compose down -v` (always: on errors and on Ctrl-C, even a repeated one) and removal of the clone →
-on the host: fetch the branch, check it, `git push origin`, `gh pr create --base <base>`.
+What `jig run` does: precondition checks → the profile from `origin/<base>` → the overlay lookup and the
+harness sources printed → the system prompt and the compose override written to the run directory → a
+clone of that commit in `$JIG_HOME/runs/<owner>/<repo>/<slug>/repo` → compose project
+`jig-run_<owner>_<repo>_<slug>` (no ports on the host; owner and repo lowercased, characters other than
+latin letters, digits and `-` turned into `-`) → the plan commit and `setup` in the container →
+`claude -p` under the time limit → the branch leaves the container as a bundle → uncommitted changes are
+discarded (`git checkout -f`, `git clean -fd`, also in the middle of an abandoned merge or rebase) and
+`verify` runs on the committed branch → `docker compose down -v` (always: on errors and on Ctrl-C, even a
+repeated one) and removal of the clone → on the host: fetch the branch, check it, `git push origin`,
+`gh pr create --base <base>`.
 
 The PR is opened as a draft if `verify` is red, the time limit hit, the agent exited with an error, left
 `JIG_BLOCKED.md` or uncommitted changes, changed a protected path (`.jig/`, the `setup` and `verify`
-scripts, and the `protect` list of the base commit), or changed nothing but the plan. The reasons are
-listed in the PR description under "Needs attention".
+scripts, the plan file, and the `protect` list of the base commit; `JIG_BLOCKED.md` is never one), or
+changed nothing but the plan. The reasons are listed in the PR description under "Needs attention".
 
 jig pushes nothing (exit code 3, the local branch `jig/<slug>` is deleted):
 
@@ -207,7 +303,9 @@ The run directory `$JIG_HOME/runs/<owner>/<repo>/<slug>/` stays after the run:
 - `branch.bundle`, `branch.patch`: the branch as it left the container, and its diff;
 - `branch.objects`: every object of the branch that is not in `base` (`git cat-file --batch`), scanned
   for the credential's value;
-- `profile/.jig/`: the copy of the profile that compose ran from.
+- `profile/.jig/`: the copy of the profile that compose ran from;
+- `system-prompt.md`: the engine rules and the overlay rules, as the agent got them;
+- `compose.harness.yml`: the compose file jig added for the harness mounts.
 
 The clone `repo/` is gone after the run: it holds the agent's `.git`, whose hooks and config any
 git-aware prompt or editor on the host would run. The exception is a Ctrl-C while the clone is still
@@ -222,8 +320,10 @@ it was pushed).
 - The first commit of the branch adds exactly `plans/<slug>.md`, as jig copied it; the plan cannot
   already exist on `base`.
 - `JIG_BLOCKED.md` at the repository root is how the agent says the plan cannot be done.
-- `.jig/` and the `setup` and `verify` scripts are protected whatever the `protect` list says: a branch
-  that changes them becomes a draft PR, so the agent cannot turn its own check green by editing it.
+- The engine rules are in the agent's system prompt in every run.
+- `.jig/`, the `setup` and `verify` scripts and the plan file are protected whatever the `protect` list
+  says: a branch that changes them becomes a draft PR, so the agent cannot turn its own check green by
+  editing it.
 - Changes under `.github/` are never pushed.
 - The model credential's value never leaves the run directory unredacted, and a branch carrying it is
   not pushed.
@@ -255,5 +355,8 @@ it was pushed).
 
 `test/profile_test.sh` checks the `.jig/config` parser, the protected-path matching, loading the
 profile from a commit, finding the base on a local bare `origin`, and starting `bin/jig` through a
-symlink. It needs bash and git 2.28 or newer, works offline and leaves nothing behind:
-`bash test/profile_test.sh`.
+symlink. `test/harness_test.sh` checks the overlay lookup and its validation (a relative `JIG_PROFILES`
+stops `jig run` before the credential check), the rendered engine rules, the system prompt, the compose
+override, the agent's arguments, the name warnings and the harness report on the terminal and in the PR.
+Both need bash and git 2.28 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
+`bash test/harness_test.sh`.

@@ -97,12 +97,15 @@ jig_resolve_base() {
   base_branch="$profile_base"
 }
 
+jig_protected_patterns() {
+  protected_patterns=(".jig/*" "$profile_setup" "$profile_verify" "plans/$slug.md" ${profile_protect[@]+"${profile_protect[@]}"})
+}
+
 jig_protected() {
   local p
-  case "$1" in
-    .jig/* | "$profile_setup" | "$profile_verify") return 0 ;;
-  esac
-  for p in ${profile_protect[@]+"${profile_protect[@]}"}; do
+  [ "$1" != JIG_BLOCKED.md ] || return 1
+  jig_protected_patterns
+  for p in "${protected_patterns[@]}"; do
     [[ $1 == $p ]] && return 0
   done
   return 1

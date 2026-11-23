@@ -16,6 +16,7 @@ branch="jig/$slug"
 minutes="${JIG_TIMEOUT:-60}"
 [[ $minutes =~ $minutes_re ]] || jig_fail "JIG_TIMEOUT must be a positive whole number of minutes"
 jig_set_home
+jig_set_profiles
 
 if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   jig_fail "both CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are set; unset one of them.
@@ -163,20 +164,18 @@ finish() {
   exit "$status"
 }
 
-printable() {
-  local s="$1" LC_ALL=C
-  s="${s//[^[:print:]]/?}"
-  printf '%s' "${s//\`/?}"
-}
-
 elapsed() {
   local s=$(( $(date +%s) - $1 ))
   echo "$(( s / 60 ))m $(( s % 60 ))s"
 }
 
+jig_find_overlay
+jig_harness_report
+
 mkdir -p "$(dirname "$run")" || jig_fail "could not create $(dirname "$run")"
 mkdir "$run" || jig_fail "could not create $run"
 jig_extract_profile "$base" "$run/profile" || die "could not extract .jig/ of $base into $run/profile"
+jig_use_harness "$run/compose.harness.yml" "$run/system-prompt.md" || die "could not write the harness files into $run"
 jig_clone "$base" "$run/repo" || die "git clone failed"
 mkdir -p "$run/repo/plans" || die "could not create $run/repo/plans"
 cp "$plan_abs" "$run/repo/plans/$slug.md" || die "could not copy the plan into the clone"
@@ -195,12 +194,7 @@ jig_compose exec -T -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME
 echo "$jig_name: preparing the environment with $profile_setup (log: $run/setup.log)"
 jig_compose exec -T app "./$profile_setup" >"$run/setup.log" 2>&1 || die "$profile_setup failed: see $run/setup.log"
 
-prompt="Implement the plan in plans/$slug.md. Follow this repository's instructions.
-Work on the current branch and commit in small, meaningful commits. Do not push anything.
-Before you finish, get $profile_verify green.
-Do not delete or weaken tests to get it green.
-If the plan cannot be done or contradicts itself, stop and write the reason to JIG_BLOCKED.md
-at the repository root."
+prompt="Implement the plan in plans/$slug.md."
 
 echo "$jig_name: agent running, up to $minutes min (log: $run/claude.log)"
 agent_started=$(date +%s)
@@ -210,7 +204,7 @@ agent_status=0
   jig_compose exec -T -e "$cred_name" \
     -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME -e GIT_COMMITTER_EMAIL app \
     timeout -k 60 "${minutes}m" \
-    claude -p "$prompt" --dangerously-skip-permissions --output-format stream-json --verbose
+    claude -p "$prompt" "${jig_harness_args[@]}" --dangerously-skip-permissions --output-format stream-json --verbose
 ) </dev/null >"$run/claude.log" 2>&1 || agent_status=$?
 # On Ctrl-C docker compose exec exits with 130 instead of dying from SIGINT, so bash skips its INT trap.
 [ "$agent_status" != 130 ] || exit 130
@@ -309,13 +303,10 @@ protected_count=0
 beyond_plan=0
 while IFS= read -r -d '' f; do
   case "$f" in
-    "plans/$slug.md")
-      [ "$(g rev-parse "$tip:plans/$slug.md" 2>/dev/null || true)" = "$plan_blob" ] || protected="$protected- \`$f\` (the plan itself)
-"
-      continue ;;
-    JIG_BLOCKED.md) continue ;;
+    "plans/$slug.md") [ "$(g rev-parse "$tip:$f" 2>/dev/null || true)" != "$plan_blob" ] || continue ;;
+    JIG_BLOCKED.md) ;;
+    *) beyond_plan=1 ;;
   esac
-  beyond_plan=1
   if jig_protected "$f"; then
     protected_count=$(( protected_count + 1 ))
     [ "$protected_count" -gt "$list_max" ] || protected="$protected- \`$(printable "$f")\`
@@ -406,6 +397,8 @@ body="$run/pr-body.md"
     echo
     printf '%s' "$attention"
   fi
+  echo
+  printf '%s' "$jig_harness_md"
   echo
   echo "## Agent summary"
   echo

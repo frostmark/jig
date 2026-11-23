@@ -23,6 +23,12 @@ jig_set_home() {
   esac
 }
 
+printable() {
+  local s="$1" LC_ALL=C
+  s="${s//[^[:print:]]/?}"
+  printf '%s' "${s//\`/?}"
+}
+
 jig_docker_name() {
   printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C tr -c 'a-z0-9-' '-'
 }
@@ -49,11 +55,11 @@ jig_clone() {
 jig_extract_profile() {
   local rev="$1" dest="$2"
   mkdir "$dest" && git -C "$repo_root" archive --format=tar "$rev" .jig | tar -x -f - -C "$dest" || return 1
-  jig_compose_file="$dest/.jig/compose.yml"
+  jig_compose_files=(-f "$dest/.jig/compose.yml")
 }
 
 jig_compose() {
-  docker compose -p "$jig_project" -f "$jig_compose_file" "$@"
+  docker compose -p "$jig_project" "${jig_compose_files[@]}" "$@"
 }
 
 jig_use_workspace() {
