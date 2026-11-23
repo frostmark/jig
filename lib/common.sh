@@ -29,6 +29,24 @@ printable() {
   printf '%s' "${s//\`/?}"
 }
 
+jig_say() {
+  local line
+  while IFS= read -r line; do
+    echo "$jig_name: $line"
+  done < <("$@")
+}
+
+jig_warn() {
+  local line
+  jig_warnings=""
+  while IFS= read -r line; do
+    line="WARNING: $(printable "$line")"
+    echo "$jig_name: $line" >&2
+    jig_warnings="$jig_warnings$line
+"
+  done < <("$@")
+}
+
 jig_docker_name() {
   printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C tr -c 'a-z0-9-' '-'
 }

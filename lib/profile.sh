@@ -157,6 +157,39 @@ jig_extract_profile() {
   jig_compose_files=(-f "$profile/compose.yml" -f "$dir/compose.profile.yml")
 }
 
+jig_profile_sources() {
+  local overlay="$1" f
+  [ -z "$overlay_commit" ] || echo "overlay commit: $overlay_commit"
+  {
+    for f in ${profile_repo_files[@]+"${profile_repo_files[@]}"}; do
+      jig_in_overlay "$f" || echo "profile .jig/$(printable "$f"): repository"
+    done
+    for f in ${overlay_files[@]+"${overlay_files[@]}"}; do
+      echo "profile .jig/$f: overlay $overlay/$f"
+    done
+  } | LC_ALL=C sort
+}
+
+jig_profile_warnings() {
+  local f
+  jig_overlay_warnings
+  for f in ${profile_repo_files[@]+"${profile_repo_files[@]}"}; do
+    ! jig_in_overlay "$f" || echo "the overlay's $f replaces the repository's .jig/$f"
+  done
+}
+
+jig_profile_report() {
+  jig_overlay_version
+  jig_say jig_profile_sources "$overlay_dir"
+  jig_warn jig_profile_warnings
+  jig_profile_md="## Profile
+
+\`\`\`
+$(jig_profile_sources "\$JIG_PROFILES/$gh_owner/$gh_name")
+$jig_warnings\`\`\`
+"
+}
+
 jig_fetch_branch() {
   git -C "$repo_root" fetch --quiet --no-tags origin "+refs/heads/$1:refs/remotes/origin/$1" ||
     jig_fail "git fetch origin $1 failed"

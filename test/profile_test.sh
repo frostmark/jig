@@ -486,6 +486,97 @@ equals "a repository without .jig/ gets the overlay's files only" "$(files_in "$
   "./compose.yml ./config ./setup "
 rm -r "$JIG_PROFILES"
 
+reported() {
+  (jig_find_overlay && load_head && jig_profile_report >"$tmp/out" 2>"$tmp/err" &&
+    printf '%s\n--\n%s\n--\n%s' "$(cat "$tmp/out")" "$(cat "$tmp/err")" "$jig_profile_md") 2>&1
+}
+
+new_origin
+write_profile "$(profile_of main 'deploy/*')"
+mkdir -p "$work/.jig/x\`y"
+: >"$work/.jig/x\`y/notes"
+publish main
+equals "the profile report without an overlay" "$(reported)" "jig: profile .jig/compose.yml: repository
+jig: profile .jig/config: repository
+jig: profile .jig/x?y/notes: repository
+--
+
+--
+## Profile
+
+\`\`\`
+profile .jig/compose.yml: repository
+profile .jig/config: repository
+profile .jig/x?y/notes: repository
+\`\`\`"
+
+git init -q -b main "$JIG_PROFILES"
+overlay_file config "$(profile_of main 'overlay/*')"
+overlay_file Dockerfile 'FROM scratch'
+overlay_file rules.md 'rules'
+git -C "$JIG_PROFILES" add -A && git -C "$JIG_PROFILES" commit -q -m overlay
+overlay_commit="$(git -C "$JIG_PROFILES" rev-parse HEAD)"
+mkdir -p "$JIG_PROFILES/acme/other"
+: >"$JIG_PROFILES/acme/other/config"
+equals "the profile report with a committed overlay that shadows the repository's config" "$(reported)" "jig: overlay commit: $overlay_commit
+jig: profile .jig/Dockerfile: overlay $overlay/Dockerfile
+jig: profile .jig/compose.yml: repository
+jig: profile .jig/config: overlay $overlay/config
+jig: profile .jig/x?y/notes: repository
+--
+jig: WARNING: the overlay's config replaces the repository's .jig/config
+--
+## Profile
+
+\`\`\`
+overlay commit: $overlay_commit
+profile .jig/Dockerfile: overlay \$JIG_PROFILES/acme/shop/Dockerfile
+profile .jig/compose.yml: repository
+profile .jig/config: overlay \$JIG_PROFILES/acme/shop/config
+profile .jig/x?y/notes: repository
+WARNING: the overlay's config replaces the repository's .jig/config
+\`\`\`"
+
+warned() {
+  (jig_find_overlay && load_head && jig_profile_report >/dev/null 2>"$tmp/err" && cat "$tmp/err") 2>&1
+}
+
+overlay_file Dockerfile 'FROM debian'
+equals "a changed overlay file" "$(warned)" "jig: WARNING: the overlay has uncommitted changes in acme/shop, and this run uses them
+jig: WARNING: the overlay's config replaces the repository's .jig/config"
+git -C "$JIG_PROFILES" checkout -q -- acme/shop/Dockerfile
+overlay_file compose.yml 'services:'
+equals "an untracked overlay file" "$(warned)" "jig: WARNING: the overlay has uncommitted changes in acme/shop, and this run uses them
+jig: WARNING: the overlay's compose.yml replaces the repository's .jig/compose.yml
+jig: WARNING: the overlay's config replaces the repository's .jig/config"
+rm "$overlay/compose.yml"
+rm -rf "$JIG_PROFILES/.git"
+equals "an overlay root that is not a git repository" "$(reported)" "jig: profile .jig/Dockerfile: overlay $overlay/Dockerfile
+jig: profile .jig/compose.yml: repository
+jig: profile .jig/config: overlay $overlay/config
+jig: profile .jig/x?y/notes: repository
+--
+jig: WARNING: JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version
+jig: WARNING: the overlay's config replaces the repository's .jig/config
+--
+## Profile
+
+\`\`\`
+profile .jig/Dockerfile: overlay \$JIG_PROFILES/acme/shop/Dockerfile
+profile .jig/compose.yml: repository
+profile .jig/config: overlay \$JIG_PROFILES/acme/shop/config
+profile .jig/x?y/notes: repository
+WARNING: JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version
+WARNING: the overlay's config replaces the repository's .jig/config
+\`\`\`"
+git init -q -b main "$JIG_PROFILES"
+git -C "$JIG_PROFILES" commit -q --allow-empty -m empty
+mv "$overlay" "$tmp/shop-overlay"
+ln -s "$tmp/shop-overlay" "$overlay"
+equals "an overlay directory outside the overlay repository" "$(warned)" "jig: WARNING: could not check the overlay acme/shop for uncommitted changes (git status failed)
+jig: WARNING: the overlay's config replaces the repository's .jig/config"
+rm -rf "$JIG_PROFILES" "$tmp/shop-overlay"
+
 mkdir "$tmp/bin" "$tmp/links"
 ln -s "$root/bin/jig" "$tmp/links/jig"
 ln -s ../links/jig "$tmp/bin/jig"

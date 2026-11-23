@@ -170,6 +170,7 @@ elapsed() {
   echo "$(( s / 60 ))m $(( s % 60 ))s"
 }
 
+jig_profile_report
 jig_harness_report
 
 mkdir -p "$(dirname "$run")" || jig_fail "could not create $(dirname "$run")"
@@ -397,6 +398,8 @@ body="$run/pr-body.md"
     echo
     printf '%s' "$attention"
   fi
+  echo
+  printf '%s' "$jig_profile_md"
   echo
   printf '%s' "$jig_harness_md"
   echo

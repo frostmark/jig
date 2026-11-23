@@ -5,6 +5,7 @@ head="$(git -C "$repo_root" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" || 
 jig_repo_identity
 jig_find_overlay
 jig_load_profile "$head" HEAD
+jig_profile_report
 
 run="$jig_home/smoke/$gh_owner/$gh_name"
 jig_project="jig-smoke_$docker_repo"
