@@ -231,15 +231,28 @@ jig_profile_warnings() {
   done
 }
 
+jig_capped() {
+  local line n=0
+  while IFS= read -r line; do
+    n=$(( n + 1 ))
+    [ "$n" -gt "$list_max" ] || printf '%s\n' "$line"
+  done
+  [ "$n" -le "$list_max" ] || echo "... and $(( n - list_max )) more"
+}
+
 jig_profile_report() {
+  local warnings
   jig_overlay_version
   jig_say jig_profile_sources "$overlay_dir"
   jig_warn jig_profile_warnings
+  warnings="$(printf '%s' "$jig_warnings" | jig_capped)"
+  [ -z "$warnings" ] || warnings="$warnings
+"
   jig_profile_md="## Profile
 
 \`\`\`
-$(jig_profile_sources "\$JIG_PROFILES/$gh_owner/$gh_name")
-$jig_warnings\`\`\`
+$(jig_profile_sources "\$JIG_PROFILES/$gh_owner/$gh_name" | jig_capped)
+$warnings\`\`\`
 "
 }
 

@@ -587,6 +587,18 @@ overlay_file compose.yml 'services:'
 equals "an untracked overlay file" "$(warned)" "jig: WARNING: the overlay has uncommitted changes in acme/shop, and this run uses them
 jig: WARNING: the overlay's compose.yml replaces the repository's .jig/compose.yml
 jig: WARNING: the overlay's config replaces the repository's .jig/config"
+equals "the PR section caps its lists" \
+  "$( (list_max=2 && jig_find_overlay && load_head && jig_profile_report >/dev/null 2>&1 && printf '%s' "$jig_profile_md") 2>&1)" \
+  "## Profile
+
+\`\`\`
+overlay commit: $overlay_commit
+profile .jig/Dockerfile: overlay \$JIG_PROFILES/acme/shop/Dockerfile
+... and 3 more
+WARNING: the overlay has uncommitted changes in acme/shop, and this run uses them
+WARNING: the overlay's compose.yml replaces the repository's .jig/compose.yml
+... and 1 more
+\`\`\`"
 rm "$overlay/compose.yml"
 rm -rf "$JIG_PROFILES/.git"
 equals "an overlay root that is not a git repository" "$(reported)" "jig: profile .jig/Dockerfile: overlay $overlay/Dockerfile

@@ -1,4 +1,5 @@
 jig_interrupted=0
+list_max=50
 
 jig_fail() {
   echo "$jig_name: $*" >&2

@@ -173,7 +173,8 @@ git repository with a commit, or the overlay directory is a link out of it, it w
 version cannot be recorded. Neither stops the run. A link in the overlay is committed as a link, not as
 the file it points to, so a change of that file is neither in the overlay commit nor warned about.
 `jig run` puts the same lines in the PR description under "Profile", with the overlay's paths as
-`$JIG_PROFILES/acme/shop/...` instead of host paths.
+`$JIG_PROFILES/acme/shop/...` instead of host paths; there the sources and the warnings stop after 50
+lines each with `... and <n> more`.
 
 ### Compose contract
 

@@ -1,5 +1,4 @@
 slug_re='^[a-z0-9][a-z0-9-]*$'
-list_max=50
 minutes_re='^[1-9][0-9]*$'
 
 [ -f "$plan" ] || jig_fail "plan file not found: $plan"
