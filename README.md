@@ -4,8 +4,9 @@
 request on the target repository. Code enters the container as a clone and leaves it as a branch; the
 container gets no GitHub access and no secrets other than the model credential.
 
-jig is the engine. Each target repository describes its own environment in a profile, the `.jig/`
-directory (see [Repository profile](#repository-profile)). What the agent is told comes from the
+jig is the engine. Each target repository's environment is described by a profile: the repository's
+`.jig/` directory, your personal overlay outside the repository, or both (see
+[Repository profile](#repository-profile)). What the agent is told comes from the
 repository's own instructions, the engine rules and your personal overlay (see [Harness](#harness)).
 
 ## Install
@@ -39,7 +40,8 @@ repository's own instructions, the engine rules and your personal overlay (see [
 
 ## Repository profile
 
-A repository is ready for jig when it has `.jig/config`. The profile is:
+A repository is ready for jig when it has `.jig/config`, or when your overlay supplies one (see
+[Profile files from the overlay](#profile-files-from-the-overlay)). The profile is:
 
 - `.jig/config`: settings, data only (below);
 - `.jig/compose.yml` and whatever it builds (usually `.jig/Dockerfile`);
@@ -65,30 +67,91 @@ file on the host.
 | Key | | Value |
 |---|---|---|
 | `base` | required, once | The branch jig starts from and opens the PR against. Latin letters, digits, `.`, `_`, `/`, `-`, starting with a letter or digit, and a valid git branch name (`git check-ref-format`). |
-| `setup` | required, once | Script that prepares the environment (installs dependencies, creates databases). A path relative to the repository root: parts of latin letters, digits, `.`, `_`, `-` joined by `/`, no `.` or `..` parts, not starting with `-`. jig runs it as `./<path>` in `/workspace` before the agent starts. |
+| `setup` | required, once | Script that prepares the environment (installs dependencies, creates databases). A path relative to the repository root: parts of latin letters, digits, `.`, `_`, `-` joined by `/`, no `.` or `..` parts, not starting with `-`. jig runs it before the agent starts, with `/workspace` as the working directory: a path under `.jig/` is a profile file and runs as `/jig/profile/<rest>` (see [Paths in the config](#paths-in-the-config)), any other path runs as `./<path>`. |
 | `verify` | required, once | The check that decides green or red (tests, linters, build). Same rules as `setup`. The agent is asked to get it green; jig runs it again on the committed branch after the agent. |
 | `protect` | any number | Paths the agent must not change. A glob of latin letters, digits, `.`, `_`, `-`, `/` and `*`, not starting with `/`. `*` matches any characters including `/`: `deploy/*` covers everything under `deploy/`, `*/CLAUDE.md` every nested `CLAUDE.md`. A branch that changes a protected path becomes a draft PR. `.jig/`, the `setup` and `verify` scripts and the run's plan `plans/<slug>.md` are always protected and need no line here; `JIG_BLOCKED.md` at the repository root is always allowed. |
 
 An unknown key, a missing required key, a repeated `base`, `setup` or `verify`, or a value outside its
 character set stops jig with exit code 2 before anything runs; the message names the file and the line,
-for example `jig: origin/main:.jig/config:4: unknown key colour`. jig also stops with code 2 when the
-commit lacks `.jig/compose.yml` or the `setup` or `verify` script.
+for example `jig: origin/main:.jig/config:4: unknown key colour` (or the overlay's `config` with its
+path). jig also stops with code 2 when the profile lacks `compose.yml` or a `setup` or `verify` script.
+
+### Paths in the config
+
+A `setup` or `verify` value under `.jig/` names a file of the profile: the overlay's file of that name if
+there is one, otherwise the base commit's. jig mounts the whole profile read-only at `/jig/profile` in
+the `app` service and runs `.jig/setup` as `/jig/profile/setup`, always with `/workspace` as the
+working directory, so a script finds the repository through the working directory, not through its own
+path (`cd "$(dirname "$0")/.."` leads to `/jig`). Any other value is a repository file: it must exist
+in the base commit and runs as `./<path>` from the clone. The engine rules give the agent the same
+command for `verify`.
 
 ### Where jig reads the profile from
 
-- `jig run` reads it from the base commit on `origin`, never from your working tree or local branches.
-  It asks `origin` for its default branch (`git ls-remote --symref origin HEAD`), fetches it into
-  `origin/<branch>` (whatever that ref held before is overwritten, so a stale one is never used) and reads
-  `.jig/config` there. If `base` names another branch, jig fetches that branch and reads the profile
-  again from it; that copy must name itself as `base`.
-- `jig smoke` reads it from the `HEAD` commit of the checkout: commit profile changes before checking them.
+- `jig run` reads the repository's part from the base commit on `origin`, never from your working tree
+  or local branches. Without an overlay `config`, it asks `origin` for its default branch
+  (`git ls-remote --symref origin HEAD`), fetches it into `origin/<branch>` (whatever that ref held
+  before is overwritten, so a stale one is never used) and reads `.jig/config` there. If `base` names
+  another branch, jig fetches that branch and reads the profile again from it; that copy must name
+  itself as `base`. With an overlay `config`, its `base` names the branch: jig fetches that branch the
+  same way and takes the rest of the profile from it, without reading the default branch.
+- `jig smoke` reads the repository's part from the `HEAD` commit of the checkout: commit profile changes
+  in the repository before checking them. The overlay's files are read as they are on disk in both
+  commands.
 
-jig extracts `.jig/` of that commit into the run directory (`git archive`) and runs `docker compose`
-from the copy, so neither uncommitted files on the host (a local `.jig/.env` included) nor the agent's
-edits in the clone feed the compose project. The copy holds only `.jig/`: `build.context: .` and relative
-mounts in `compose.yml` see `.jig/` and nothing else of the repository, so a Dockerfile cannot `COPY`
+jig builds the profile in the run directory: `.jig/` of that commit (`git archive`), then the overlay's
+profile files copied over it. It runs `docker compose` from that copy, so neither uncommitted files in
+the repository on the host (a local `.jig/.env` included) nor the agent's edits in the clone feed the
+compose project. The copy holds only the profile: `build.context: .` and relative mounts in
+`compose.yml` see the profile and nothing else of the repository, so a Dockerfile cannot `COPY`
 repository files (lockfiles, for example). Repository code reaches the container only through the
 `${JIG_WORKSPACE}` mount.
+
+### Profile files from the overlay
+
+The overlay directory of a repository, `$JIG_PROFILES/<owner>/<repo>/` (see
+[Personal overlay](#personal-overlay)), mirrors `.jig/`: every file in it except `rules.md` and `plugin/`
+(the harness) is a profile file, at the same relative path as under `.jig/`. Each file comes from one
+layer: the overlay's file when it has one, otherwise the repository's, file by file, also in
+subdirectories. `config` is no exception: it is taken whole from one layer, never merged by key, and
+parsed with the same rules. So the overlay can replace a `Dockerfile` and nothing else, or hold the whole
+profile of a repository that has no `.jig/` at all:
+
+```
+~/.jig/profiles/
+  acme/shop/
+    config          replaces .jig/config, or is the only one
+    compose.yml
+    Dockerfile
+    setup           with "setup .jig/setup" in config
+    rules.md        harness, not a profile file
+    plugin/         harness, not a profile file
+```
+
+Overlay files are copied, so a link in the overlay becomes a regular file in the profile; the copy keeps
+the overlay file's mode (make scripts executable there). An overlay file whose name is not latin letters,
+digits, `.`, `_`, `-` in parts joined by `/`, one that is not a readable regular file (a dangling link,
+for example), or a path that is a file in one layer and a directory in the other stops jig with exit
+code 2 before anything runs.
+
+At start jig prints the source of every profile file and warns (on stderr) when an overlay file replaces
+a repository file:
+
+```
+jig: overlay commit: 4f1c2e9a0b7d6c5e4f3a2b1c0d9e8f7a6b5c4d3e
+jig: profile .jig/Dockerfile: overlay /home/you/.jig/profiles/acme/shop/Dockerfile
+jig: profile .jig/compose.yml: repository
+jig: profile .jig/config: repository
+jig: profile .jig/setup: repository
+jig: WARNING: the overlay's Dockerfile replaces the repository's .jig/Dockerfile
+```
+
+The overlay commit is `git -C $JIG_PROFILES rev-parse HEAD`, printed when the repository has an overlay
+directory. When that directory has uncommitted changes or untracked files (`git status`; ignored files
+do not count), jig warns `the overlay has uncommitted changes in acme/shop, and this run uses them`;
+when `JIG_PROFILES` is not a git repository with a commit, it warns that the overlay's version cannot be
+recorded. Neither stops the run. `jig run` puts the same lines in the PR description under "Profile",
+with the overlay's paths as `$JIG_PROFILES/acme/shop/...` instead of host paths.
 
 ### Compose contract
 
@@ -120,8 +183,9 @@ services:
       - ${JIG_WORKSPACE:?JIG_WORKSPACE must point at the clone}:/workspace
 ```
 
-In `jig run` the `app` service also gets read-only mounts under `/jig` (see [Harness](#harness)) from a
-compose file jig adds after this one; keep that path free in the image.
+The `app` service also gets read-only mounts under `/jig` from compose files jig adds after this one:
+the profile at `/jig/profile` (in `jig run` and `jig smoke`), and in `jig run` the harness (see
+[Harness](#harness)). Keep that path free in the image.
 
 Other services (a database, a cache) are the profile's business. No ports need to reach the host. The
 compose file runs on the host's Docker, so whoever can merge into `base` decides what the containers get
@@ -143,15 +207,17 @@ on the current branch and push nothing, leave nothing uncommitted, run `verify` 
 result, do not weaken tests, do not touch the protected paths or `.github/`, never print the
 environment, add a dependency only if the plan names it, write the final message as What changes,
 Behaviour changes, Not done, How to check (it becomes the PR description), and write `JIG_BLOCKED.md` when
-the plan cannot be done. jig fills in the `verify` script and the run's protected paths: `.jig/*`, the
-`setup` and `verify` scripts, `plans/<slug>.md` and the `protect` list of the base commit, leaving out an
-entry that an earlier one already covers; the rules say that `JIG_BLOCKED.md` is allowed even when a
+the plan cannot be done. jig fills in the `verify` command (`./<path>`, or `/jig/profile/<rest>` for a
+path under `.jig/`) and the run's protected paths: `.jig/*`, the `setup` and `verify` scripts,
+`plans/<slug>.md` and the `protect` list of the profile's config, leaving out an entry that an earlier
+one already covers; the rules say that `JIG_BLOCKED.md` is allowed even when a
 pattern matches it. The draft decision below checks the same list. The prompt itself only names the plan
 file.
 
 ### Personal overlay
 
-The overlay holds harness you are trying out before it moves into the repository. Its root is
+The overlay holds harness and profile files you are trying out before they move into the repository
+(profile files: see [Profile files from the overlay](#profile-files-from-the-overlay)). Its root is
 `JIG_PROFILES` (an absolute path, `$JIG_HOME/profiles` by default, so `~/.jig/profiles`); keep it as a
 private git repository of its own. Each target repository has a directory `<owner>/<repo>/` there, named
 like its run directories (the GitHub owner and name as `gh repo view` reports them):
@@ -176,8 +242,9 @@ like its run directories (the GitHub owner and name as `gh repo view` reports th
   the `"subtype":"init"` line of `claude.log` lists the plugins that loaded.
 
 Both are optional: without the overlay directory, or without one of them, the run goes on with what
-there is. An `<owner>/<repo>` that is not a directory, a `rules.md` that is not a readable regular file
-or a `plugin` that is not a directory stops jig with exit code 2 before anything runs.
+there is. Everything else in the directory is a profile file. An `<owner>/<repo>` that is not a
+directory, a `rules.md` that is not a readable regular file or a `plugin` that is not a directory stops
+jig with exit code 2 before anything runs.
 
 jig writes `system-prompt.md` (the engine rules, then the overlay's `rules.md`) and
 `compose.harness.yml` into the run directory and passes that compose file after the profile's
@@ -238,8 +305,9 @@ jig run ~/plans/add-health-check.md --repo ~/src/shop
 current directory. `JIG_HOME` (an absolute path, `~/.jig` by default) holds run and smoke directories;
 `JIG_PROFILES` (an absolute path, `$JIG_HOME/profiles` by default) is the overlay root.
 
-What `jig run` does: precondition checks → the profile from `origin/<base>` → the overlay lookup and the
-harness sources printed → the system prompt and the compose override written to the run directory → a
+What `jig run` does: precondition checks → the overlay lookup → the base and the profile (`.jig/` of
+`origin/<base>` with the overlay's profile files over it) → the profile and harness sources printed →
+the profile, the system prompt and the compose overrides written to the run directory → a
 clone of that commit in `$JIG_HOME/runs/<owner>/<repo>/<slug>/repo` → compose project
 `jig-run_<owner>_<repo>_<slug>` (no ports on the host; owner and repo lowercased, characters other than
 latin letters, digits and `-` turned into `-`) → the plan commit and `setup` in the container →
@@ -251,7 +319,7 @@ repeated one) and removal of the clone → on the host: fetch the branch, check 
 
 The PR is opened as a draft if `verify` is red, the time limit hit, the agent exited with an error, left
 `JIG_BLOCKED.md` or uncommitted changes, changed a protected path (`.jig/`, the `setup` and `verify`
-scripts, the plan file, and the `protect` list of the base commit; `JIG_BLOCKED.md` is never one), or
+scripts, the plan file, and the `protect` list of the profile's config; `JIG_BLOCKED.md` is never one), or
 changed nothing but the plan. The reasons are listed in the PR description under "Needs attention".
 
 jig pushes nothing (exit code 3, the local branch `jig/<slug>` is deleted):
@@ -283,9 +351,11 @@ project is being removed does not interrupt `docker compose down`.
 
 ### Smoke
 
-`jig smoke` checks a profile without the agent: it clones `HEAD` into
+`jig smoke` checks a profile without the agent: it builds the profile from `HEAD` and the overlay as
+`jig run` does from the base commit (and prints the same profile lines), clones `HEAD` into
 `$JIG_HOME/smoke/<owner>/<repo>/repo`, starts compose project `jig-smoke_<owner>_<repo>`, runs `setup`
-and `verify`, and fails if they left changes in the clone. The compose project is always removed; the
+and `verify`, and fails if they left changes in the clone. So an overlay profile, or overlay changes not
+yet committed, can be checked before a run. The compose project is always removed; the
 clone stays until the next smoke. Exit code 0 means green; any other code is the exit code of the step
 that failed, and 2 means an invalid call, profile or host, or a `setup` or `verify` that itself exited
 with 2 (the output above the last line tells which).
@@ -303,7 +373,9 @@ The run directory `$JIG_HOME/runs/<owner>/<repo>/<slug>/` stays after the run:
 - `branch.bundle`, `branch.patch`: the branch as it left the container, and its diff;
 - `branch.objects`: every object of the branch that is not in `base` (`git cat-file --batch`), scanned
   for the credential's value;
-- `profile/.jig/`: the copy of the profile that compose ran from;
+- `profile/.jig/`: the profile that compose ran from and that was mounted at `/jig/profile`: `.jig/` of
+  the base commit with the overlay's profile files over it;
+- `compose.profile.yml`: the compose file jig added for the profile mount;
 - `system-prompt.md`: the engine rules and the overlay rules, as the agent got them;
 - `compose.harness.yml`: the compose file jig added for the harness mounts.
 
@@ -332,8 +404,8 @@ it was pushed).
 
 - Outbound network from the containers is open: the internet, `host.docker.internal` (services on the
   host) and the local network. There is no allow list.
-- The agent sees everything in the repository, including any committed test secrets, and its own model
-  token in its environment.
+- The agent sees everything in the repository, including any committed test secrets, the whole profile
+  at `/jig/profile` (overlay files included), and its own model token in its environment.
 - Needs git 2.49 or newer (`git clone --revision`).
 - One run at a time; parallel runs are not supported.
 - The image is built locally for the host's architecture, and the first build takes minutes; there is no
@@ -354,9 +426,11 @@ it was pushed).
 ## Tests
 
 `test/profile_test.sh` checks the `.jig/config` parser, the protected-path matching, loading the
-profile from a commit, finding the base on a local bare `origin`, and starting `bin/jig` through a
-symlink. `test/harness_test.sh` checks the overlay lookup and its validation (a relative `JIG_PROFILES`
-stops `jig run` before the credential check), the rendered engine rules, the system prompt, the compose
-override, the agent's arguments, the name warnings and the harness report on the terminal and in the PR.
+profile from a commit, the overlay's profile files and their validation, finding the base on a local
+bare `origin` (also from an overlay config), building the profile from both layers, the profile report
+with the overlay commit, and starting `bin/jig` through a symlink. `test/harness_test.sh` checks the
+overlay lookup and its validation (a relative `JIG_PROFILES` stops `jig run` before the credential check),
+the rendered engine rules, the system prompt, the compose override, the agent's arguments, the name
+warnings and the harness report on the terminal and in the PR.
 Both need bash and git 2.28 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
