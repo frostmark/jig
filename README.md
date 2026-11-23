@@ -82,11 +82,20 @@ path). jig also stops with code 2 when the profile lacks `compose.yml` or a `set
 A `setup` or `verify` value under `.jig/` names a file of the profile: the overlay's file of that name if
 there is one, otherwise the base commit's. jig mounts the whole profile read-only at `/jig/profile` in
 the `app` service and runs `.jig/setup` as `/jig/profile/setup`, always with `/workspace` as the
-working directory, so a script finds the repository through the working directory, not through its own
-path (`cd "$(dirname "$0")/.."` leads to `/jig`). Any other value is a repository file: it must exist
-in the base commit and runs as `./<path>` from the clone. The engine rules give the agent the `verify`
-command with its working directory, `cd /workspace && /jig/profile/verify` or
-`cd /workspace && ./scripts/verify`, so it runs in the right place even after the agent changed directory.
+working directory. Any other value is a repository file: it must exist in the base commit and runs as
+`./<path>` from the clone. The engine rules give the agent the `verify` command with its working
+directory, `cd /workspace && /jig/profile/verify` or `cd /workspace && ./scripts/verify`, so it runs in
+the right place even after the agent changed directory.
+
+This changes how existing profiles run: jig used to run `.jig/setup` as `./.jig/setup` in the clone.
+
+- A script under `.jig/` must find the repository through the working directory, `/workspace`, not
+  through its own path: `cd "$(dirname "$0")/.."` now leads to `/jig`. It reaches its sibling profile
+  files as `"$(dirname "$0")/<file>"` (the merged profile, overlay files included); `./.jig/<file>` is the
+  clone's copy from the base commit, as the agent may have changed it, never the overlay's.
+- The `verify` that jig runs on the committed branch after the agent is the profile's copy, from the base
+  commit or the overlay, not a `.jig/verify` the agent changed and committed (such a change still makes
+  the PR a draft).
 
 ### Where jig reads the profile from
 
@@ -123,8 +132,8 @@ read every profile file at `/jig/profile`, so secrets must not live in the overl
 
 Each file comes from one layer: the overlay's file when it has one, otherwise the repository's, file by
 file, also in subdirectories. `config` is no exception: it is taken whole from one layer, never merged by
-key, and parsed with the same rules. So the overlay can replace a `Dockerfile` and nothing else, or hold the whole
-profile of a repository that has no `.jig/` at all:
+key, and parsed with the same rules. So the overlay can replace a `Dockerfile` and nothing else, or hold
+the whole profile of a repository that has no `.jig/` at all:
 
 ```
 ~/.jig/profiles/
@@ -140,8 +149,8 @@ profile of a repository that has no `.jig/` at all:
 Overlay files are copied, so a link in the overlay becomes a regular file in the profile; the copy keeps
 the overlay file's mode (make scripts executable there). An overlay file whose name is not latin letters,
 digits, `.`, `_`, `-` in parts joined by `/`, one that is not a readable regular file (a dangling link
-or a link to a directory, for example), or a path that is a file in one layer and a directory in the other stops jig with exit
-code 2 before anything runs.
+or a link to a directory, for example), or a path that is a file in one layer and a directory in the
+other stops jig with exit code 2 before anything runs.
 
 At start jig prints the source of every profile file and warns (on stderr) when an overlay file replaces
 a repository file:
