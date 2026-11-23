@@ -204,7 +204,8 @@ jig: overlay plugin: /home/you/.jig/profiles/acme/shop/plugin
 jig: WARNING: the overlay plugin's skill review has the same name as .claude/skills/review in the repository; the agent sees both
 ```
 
-The same lines go into the PR description under "Harness".
+The PR description gets the same lines under "Harness" without host paths: the engine rules appear as
+`jig's lib/rules.md` and the overlay items under `$JIG_PROFILES/acme/shop/`.
 
 ## Plan
 

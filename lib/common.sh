@@ -23,6 +23,12 @@ jig_set_home() {
   esac
 }
 
+printable() {
+  local s="$1" LC_ALL=C
+  s="${s//[^[:print:]]/?}"
+  printf '%s' "${s//\`/?}"
+}
+
 jig_docker_name() {
   printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C tr -c 'a-z0-9-' '-'
 }

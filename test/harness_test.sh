@@ -105,18 +105,6 @@ ln -s "$tmp/missing" "$overlay"
 exits_2 "the repository's overlay is a dangling link" "the overlay $overlay must be a directory" find_in "$profiles"
 rm "$overlay"
 
-overlay_dir="$overlay"
-overlay_rules=""
-overlay_plugin=""
-equals "sources without an overlay" "$(jig_harness_sources)" "engine rules: $root/lib/rules.md
-overlay rules: none (no $overlay/rules.md)
-overlay plugin: none (no $overlay/plugin)"
-overlay_rules="$overlay/rules.md"
-overlay_plugin="$overlay/plugin"
-equals "sources with an overlay" "$(jig_harness_sources)" "engine rules: $root/lib/rules.md
-overlay rules: $overlay/rules.md
-overlay plugin: $overlay/plugin"
-
 slug=add-health-check
 jig_parse_profile cfg <<<"base main
 setup .jig/setup
@@ -218,6 +206,44 @@ overlay_plugin="$overlay/plugin"
 git -C "$repo_root" rm -q -r .claude && git -C "$repo_root" commit -q -m "no harness"
 base="$(git -C "$repo_root" rev-parse HEAD)"
 equals "a repository without .claude/, no name warnings" "$(jig_harness_shadows)" ""
+
+mkdir -p "$repo_root/.claude/skills/x\`y" "$overlay/plugin/skills/x\`y"
+: >"$repo_root/.claude/skills/x\`y/SKILL.md"
+git -C "$repo_root" add -A && git -C "$repo_root" commit -q -m "a skill with a backtick"
+base="$(git -C "$repo_root" rev-parse HEAD)"
+overlay_root="$profiles"
+overlay_dir="$overlay"
+overlay_rules="$overlay/rules.md"
+overlay_plugin="$overlay/plugin"
+jig_harness_report >"$tmp/out" 2>"$tmp/err"
+equals "the harness sources go to stdout with host paths" "$(cat "$tmp/out")" "jig: engine rules: $root/lib/rules.md
+jig: overlay rules: $overlay/rules.md
+jig: overlay plugin: $overlay/plugin"
+equals "name warnings go to stderr, printable" "$(cat "$tmp/err")" \
+  "jig: WARNING: the overlay plugin's skill x?y has the same name as .claude/skills/x?y in the repository; the agent sees both"
+equals "the PR section has the sources without host paths and the warnings" "$jig_harness_md" '## Harness
+
+```
+engine rules: jig'"'"'s lib/rules.md
+overlay rules: $JIG_PROFILES/acme/shop/rules.md
+overlay plugin: $JIG_PROFILES/acme/shop/plugin
+WARNING: the overlay plugin'"'"'s skill x?y has the same name as .claude/skills/x?y in the repository; the agent sees both
+```
+'
+overlay_rules=""
+overlay_plugin=""
+jig_harness_report >"$tmp/out" 2>"$tmp/err"
+equals "the harness sources without an overlay" "$(cat "$tmp/out")" "jig: engine rules: $root/lib/rules.md
+jig: overlay rules: none (no $overlay/rules.md)
+jig: overlay plugin: none (no $overlay/plugin)"
+equals "the PR section without an overlay" "$jig_harness_md" '## Harness
+
+```
+engine rules: jig'"'"'s lib/rules.md
+overlay rules: none (no $JIG_PROFILES/acme/shop/rules.md)
+overlay plugin: none (no $JIG_PROFILES/acme/shop/plugin)
+```
+'
 
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]

@@ -164,29 +164,13 @@ finish() {
   exit "$status"
 }
 
-printable() {
-  local s="$1" LC_ALL=C
-  s="${s//[^[:print:]]/?}"
-  printf '%s' "${s//\`/?}"
-}
-
 elapsed() {
   local s=$(( $(date +%s) - $1 ))
   echo "$(( s / 60 ))m $(( s % 60 ))s"
 }
 
 jig_find_overlay
-harness=""
-while IFS= read -r line; do
-  harness="$harness$(printable "$line")
-"
-done < <(jig_harness_sources; jig_harness_shadows | sed 's/^/WARNING: /')
-while IFS= read -r line; do
-  case "$line" in
-    WARNING:*) echo "$jig_name: $line" >&2 ;;
-    *) echo "$jig_name: $line" ;;
-  esac
-done < <(printf "%s" "$harness")
+jig_harness_report
 
 mkdir -p "$(dirname "$run")" || jig_fail "could not create $(dirname "$run")"
 mkdir "$run" || jig_fail "could not create $run"
@@ -414,11 +398,7 @@ body="$run/pr-body.md"
     printf '%s' "$attention"
   fi
   echo
-  echo "## Harness"
-  echo
-  echo '```'
-  printf '%s' "$harness"
-  echo '```'
+  printf '%s' "$jig_harness_md"
   echo
   echo "## Agent summary"
   echo

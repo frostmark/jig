@@ -28,16 +28,17 @@ jig_find_overlay() {
 }
 
 jig_harness_sources() {
-  echo "engine rules: $jig_rules_file"
+  local rules="$1" overlay="$2"
+  echo "engine rules: $rules"
   if [ -n "$overlay_rules" ]; then
-    echo "overlay rules: $overlay_rules"
+    echo "overlay rules: $overlay/rules.md"
   else
-    echo "overlay rules: none (no $overlay_dir/rules.md)"
+    echo "overlay rules: none (no $overlay/rules.md)"
   fi
   if [ -n "$overlay_plugin" ]; then
-    echo "overlay plugin: $overlay_plugin"
+    echo "overlay plugin: $overlay/plugin"
   else
-    echo "overlay plugin: none (no $overlay_dir/plugin)"
+    echo "overlay plugin: none (no $overlay/plugin)"
   fi
 }
 
@@ -55,6 +56,25 @@ jig_harness_shadows() {
     esac
   done < <(git -C "$repo_root" ls-tree -z --name-only "$base:.claude/agents" 2>/dev/null)
   return 0
+}
+
+jig_harness_report() {
+  local line warnings=""
+  while IFS= read -r line; do
+    echo "$jig_name: $line"
+  done < <(jig_harness_sources "$jig_rules_file" "$overlay_dir")
+  while IFS= read -r line; do
+    line="WARNING: $(printable "$line")"
+    echo "$jig_name: $line" >&2
+    warnings="$warnings$line
+"
+  done < <(jig_harness_shadows)
+  jig_harness_md="## Harness
+
+\`\`\`
+$(jig_harness_sources "jig's lib/rules.md" "\$JIG_PROFILES/$gh_owner/$gh_name")
+$warnings\`\`\`
+"
 }
 
 jig_protected_list() {
