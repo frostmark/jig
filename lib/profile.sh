@@ -157,6 +157,29 @@ jig_extract_profile() {
   jig_compose_files=(-f "$profile/compose.yml" -f "$dir/compose.profile.yml")
 }
 
+jig_overlay_version() {
+  local changes
+  overlay_commit=""
+  overlay_changes=""
+  [ -d "$overlay_dir" ] || return 0
+  if ! overlay_commit="$(git -C "$overlay_root" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null)"; then
+    overlay_commit=""
+    overlay_changes=unrecorded
+  elif ! changes="$(git -C "$overlay_dir" status --porcelain --untracked-files=all -- . 2>/dev/null)"; then
+    overlay_changes=unknown
+  elif [ -n "$changes" ]; then
+    overlay_changes=uncommitted
+  fi
+}
+
+jig_overlay_warnings() {
+  case "$overlay_changes" in
+    unrecorded) echo "JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version" ;;
+    unknown) echo "could not check the overlay $gh_owner/$gh_name for uncommitted changes (git status failed)" ;;
+    uncommitted) echo "the overlay has uncommitted changes in $gh_owner/$gh_name, and this run uses them" ;;
+  esac
+}
+
 jig_profile_sources() {
   local overlay="$1" f
   [ -z "$overlay_commit" ] || echo "overlay commit: $overlay_commit"
