@@ -70,21 +70,35 @@ jig_overlay_git() {
   overlay_git=inside
 }
 
+jig_list_overlay() {
+  if [ "$overlay_git" = inside ]; then
+    git -C "$overlay_dir" ls-files -z -c -o --exclude-standard
+  else
+    (cd "$overlay_dir" && LC_ALL=C find . -mindepth 1 ! -type d -print0)
+  fi && printf '\0'
+}
+
 jig_find_overlay_profile() {
-  local names f
+  local f listed=0
   jig_overlay_git
-  names="$(cd "$overlay_dir" && LC_ALL=C find -L . -mindepth 1 \( -path ./rules.md -o -path ./plugin \) -prune -o ! -type d -print)" ||
-    jig_fail "could not list the files of the overlay $overlay_dir"
-  [ -n "$names" ] || return 0
-  while IFS= read -r f; do
-    [[ $f == ./* ]] && jig_valid_path "${f#./}" ||
-      jig_fail "the overlay file $(printable "$overlay_dir/${f#./}") must have a name of latin letters, digits and . _ - in parts joined by /"
+  while IFS= read -r -d '' f; do
+    if [ -z "$f" ]; then
+      listed=1
+      continue
+    fi
     f="${f#./}"
+    case "$f" in
+      rules.md | plugin | plugin/*) continue ;;
+    esac
+    [ -e "$overlay_dir/$f" ] || [ -L "$overlay_dir/$f" ] || continue
+    jig_valid_path "$f" ||
+      jig_fail "the overlay file $(printable "$overlay_dir/$f") must have a name of latin letters, digits and . _ - in parts joined by /"
     [ -f "$overlay_dir/$f" ] && [ -r "$overlay_dir/$f" ] ||
       jig_fail "the overlay file $overlay_dir/$f must be a readable regular file"
     overlay_files+=("$f")
     [ "$f" != config ] || overlay_config="$overlay_dir/config"
-  done <<<"$names"
+  done < <(jig_list_overlay)
+  [ "$listed" = 1 ] || jig_fail "could not list the files of the overlay $overlay_dir"
 }
 
 jig_in_overlay() {

@@ -340,14 +340,35 @@ overlay_listed() {
     printf '|%s' "$overlay_config") 2>&1
 }
 
-mkdir -p "$overlay/docker" "$overlay/plugin/skills/review" "$overlay/empty"
-for f in config compose.yml docker/Dockerfile .env rules.md plugin/skills/review/SKILL.md; do
+mkdir -p "$overlay/docker" "$overlay/empty" "$tmp/plugin/skills/review"
+for f in config compose.yml docker/Dockerfile .env rules.md; do
   printf 'overlay %s\n' "$f" >"$overlay/$f"
 done
+: >"$tmp/plugin/skills/review/SKILL.md"
+ln -s "$tmp/plugin" "$overlay/plugin"
 printf 'shared setup\n' >"$tmp/shared-setup"
 ln -s "$tmp/shared-setup" "$overlay/setup"
-equals "the overlay's profile files are all its files but rules.md and plugin/, links followed" "$(overlay_listed)" \
-  ".env compose.yml config docker/Dockerfile setup |$overlay/config"
+equals "without git, the overlay's profile files are all its files but rules.md and plugin, file links included" \
+  "$(overlay_listed)" ".env compose.yml config docker/Dockerfile setup |$overlay/config"
+: >"$overlay/x"
+mkdir "$overlay/x
+."
+: >"$overlay/x
+./config"
+exits_2 "an overlay file name with a newline" "the overlay file $overlay/x?./config must have a name of latin letters" jig_find_overlay
+rm -r "$overlay/x" "$overlay/x
+."
+mkdir "$tmp/shared-dir"
+: >"$tmp/shared-dir/entry.sh"
+ln -s "$tmp/shared-dir" "$overlay/docker/shared"
+exits_2 "an overlay link to a directory" "the overlay file $overlay/docker/shared must be a readable regular file" jig_find_overlay
+rm "$overlay/docker/shared"
+mkdir "$overlay/locked"
+: >"$overlay/locked/entry.sh"
+chmod 000 "$overlay/locked"
+exits_2 "an overlay directory that cannot be listed" "could not list the files of the overlay $overlay" jig_find_overlay
+chmod 755 "$overlay/locked"
+rm -r "$overlay/locked" "$overlay/plugin"
 rm "$overlay/config"
 equals "an overlay without config" "$(overlay_listed)" ".env compose.yml docker/Dockerfile setup |"
 ln -s "$tmp/missing" "$overlay/docker/entry.sh"
@@ -363,6 +384,20 @@ rm "$overlay/docker/entry.sh"
 : >"$overlay/docker/my notes.txt"
 exits_2 "an overlay file name with a space" "the overlay file $overlay/docker/my notes.txt must have a name of latin letters" jig_find_overlay
 rm -r "$JIG_PROFILES"
+
+git init -q -b main "$JIG_PROFILES"
+printf '.env\n*.swp\n' >"$JIG_PROFILES/.gitignore"
+mkdir -p "$overlay/docker" "$overlay/plugin/skills/review"
+for f in config compose.yml docker/Dockerfile docker/old.sh .env rules.md plugin/skills/review/SKILL.md; do
+  printf 'overlay %s\n' "$f" >"$overlay/$f"
+done
+git -C "$JIG_PROFILES" add -A && git -C "$JIG_PROFILES" commit -q -m overlay
+rm "$overlay/docker/old.sh"
+printf 'untracked setup\n' >"$overlay/setup"
+printf 'swap\n' >"$overlay/.config.swp"
+equals "in a git overlay, the profile files are the tracked and untracked files git does not ignore, deleted ones left out" \
+  "$(overlay_listed)" "compose.yml config docker/Dockerfile setup |$overlay/config"
+rm -rf "$JIG_PROFILES"
 
 overlay_file() {
   mkdir -p "$(dirname "$overlay/$1")"

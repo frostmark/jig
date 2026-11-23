@@ -2,7 +2,8 @@
 
 `jig run <plan>` takes a plan file, has Claude Code implement it in a Docker container and opens a pull
 request on the target repository. Code enters the container as a clone and leaves it as a branch; the
-container gets no GitHub access and no secrets other than the model credential.
+container gets no GitHub access, and the only secret jig hands it is the model credential. The profile's
+files, the overlay's included, are readable in the container, so they must not hold secrets.
 
 jig is the engine. Each target repository's environment is described by a profile: the repository's
 `.jig/` directory, your personal overlay outside the repository, or both (see
@@ -111,11 +112,18 @@ repository files (lockfiles, for example). Repository code reaches the container
 ### Profile files from the overlay
 
 The overlay directory of a repository, `$JIG_PROFILES/<owner>/<repo>/` (see
-[Personal overlay](#personal-overlay)), mirrors `.jig/`: every file in it except `rules.md` and `plugin/`
-(the harness) is a profile file, at the same relative path as under `.jig/`. Each file comes from one
-layer: the overlay's file when it has one, otherwise the repository's, file by file, also in
-subdirectories. `config` is no exception: it is taken whole from one layer, never merged by key, and
-parsed with the same rules. So the overlay can replace a `Dockerfile` and nothing else, or hold the whole
+[Personal overlay](#personal-overlay)), mirrors `.jig/`: its files other than `rules.md` and `plugin/`
+(the harness) are profile files, at the same relative path as under `.jig/`. When `JIG_PROFILES` is the
+top level of a git repository that holds the overlay directory, these are the files git lists there,
+tracked and untracked but not ignored (`git ls-files -co --exclude-standard`): ignored files such as
+`.env`, `.DS_Store` or editor swap files are left out, and so is a tracked file deleted from disk. Put such
+patterns in the overlay repository's root `.gitignore`; a `.gitignore` inside `<owner>/<repo>/` is itself a
+profile file. Otherwise every file in the directory is a profile file, dotfiles included. The agent can
+read every profile file at `/jig/profile`, so secrets must not live in the overlay directory.
+
+Each file comes from one layer: the overlay's file when it has one, otherwise the repository's, file by
+file, also in subdirectories. `config` is no exception: it is taken whole from one layer, never merged by
+key, and parsed with the same rules. So the overlay can replace a `Dockerfile` and nothing else, or hold the whole
 profile of a repository that has no `.jig/` at all:
 
 ```
@@ -131,8 +139,8 @@ profile of a repository that has no `.jig/` at all:
 
 Overlay files are copied, so a link in the overlay becomes a regular file in the profile; the copy keeps
 the overlay file's mode (make scripts executable there). An overlay file whose name is not latin letters,
-digits, `.`, `_`, `-` in parts joined by `/`, one that is not a readable regular file (a dangling link,
-for example), or a path that is a file in one layer and a directory in the other stops jig with exit
+digits, `.`, `_`, `-` in parts joined by `/`, one that is not a readable regular file (a dangling link
+or a link to a directory, for example), or a path that is a file in one layer and a directory in the other stops jig with exit
 code 2 before anything runs.
 
 At start jig prints the source of every profile file and warns (on stderr) when an overlay file replaces
@@ -153,8 +161,10 @@ directory and `JIG_PROFILES` is the top level of a git repository; a directory i
 uncommitted changes or untracked files (`git status`; ignored files do not count), jig warns
 `the overlay has uncommitted changes in acme/shop, and this run uses them`; when `JIG_PROFILES` is not a
 git repository with a commit, or the overlay directory is a link out of it, it warns that the overlay's
-version cannot be recorded. Neither stops the run. `jig run` puts the same lines in the PR description under "Profile",
-with the overlay's paths as `$JIG_PROFILES/acme/shop/...` instead of host paths.
+version cannot be recorded. Neither stops the run. A link in the overlay is committed as a link, not as
+the file it points to, so a change of that file is neither in the overlay commit nor warned about.
+`jig run` puts the same lines in the PR description under "Profile", with the overlay's paths as
+`$JIG_PROFILES/acme/shop/...` instead of host paths.
 
 ### Compose contract
 
@@ -246,7 +256,8 @@ like its run directories (the GitHub owner and name as `gh repo view` reports th
   the `"subtype":"init"` line of `claude.log` lists the plugins that loaded.
 
 Both are optional: without the overlay directory, or without one of them, the run goes on with what
-there is. Everything else in the directory is a profile file. An `<owner>/<repo>` that is not a
+there is. The other files in the directory are profile files, readable by the agent (see
+[Profile files from the overlay](#profile-files-from-the-overlay)). An `<owner>/<repo>` that is not a
 directory, a `rules.md` that is not a readable regular file or a `plugin` that is not a directory stops
 jig with exit code 2 before anything runs.
 
@@ -430,9 +441,10 @@ it was pushed).
 ## Tests
 
 `test/profile_test.sh` checks the `.jig/config` parser, the protected-path matching, loading the
-profile from a commit, the overlay's profile files and their validation, finding the base on a local
-bare `origin` (also from an overlay config), building the profile from both layers, the profile report
-with the overlay commit, and starting `bin/jig` through a symlink. `test/harness_test.sh` checks the
+profile from a commit, the overlay's profile files (listed by git in an overlay repository, by the
+directory otherwise) and their validation, finding the base on a local bare `origin` (also from an
+overlay config), building the profile from both layers, the profile report with the overlay commit, and
+starting `bin/jig` through a symlink. `test/harness_test.sh` checks the
 overlay lookup and its validation (a relative `JIG_PROFILES` stops `jig run` before the credential check),
 the rendered engine rules, the system prompt, the compose override, the agent's arguments, the name
 warnings and the harness report on the terminal and in the PR.
