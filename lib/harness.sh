@@ -14,6 +14,9 @@ jig_find_overlay() {
   overlay_dir="$overlay_root/$gh_owner/$gh_name"
   overlay_rules=""
   overlay_plugin=""
+  overlay_files=()
+  overlay_config=""
+  overlay_git=""
   [ -e "$overlay_dir" ] || [ -L "$overlay_dir" ] || return 0
   [ -d "$overlay_dir" ] || jig_fail "the overlay $overlay_dir must be a directory"
   if [ -e "$overlay_dir/rules.md" ] || [ -L "$overlay_dir/rules.md" ]; then
@@ -25,6 +28,7 @@ jig_find_overlay() {
     [ -d "$overlay_dir/plugin" ] || jig_fail "the overlay plugin $overlay_dir/plugin must be a directory"
     overlay_plugin="$overlay_dir/plugin"
   fi
+  jig_find_overlay_profile
 }
 
 jig_harness_sources() {
@@ -59,21 +63,13 @@ jig_harness_shadows() {
 }
 
 jig_harness_report() {
-  local line warnings=""
-  while IFS= read -r line; do
-    echo "$jig_name: $line"
-  done < <(jig_harness_sources "$jig_rules_file" "$overlay_dir")
-  while IFS= read -r line; do
-    line="WARNING: $(printable "$line")"
-    echo "$jig_name: $line" >&2
-    warnings="$warnings$line
-"
-  done < <(jig_harness_shadows)
+  jig_say jig_harness_sources "$jig_rules_file" "$overlay_dir"
+  jig_warn jig_harness_shadows
   jig_harness_md="## Harness
 
 \`\`\`
 $(jig_harness_sources "jig's lib/rules.md" "\$JIG_PROFILES/$gh_owner/$gh_name")
-$warnings\`\`\`
+$jig_warnings\`\`\`
 "
 }
 
@@ -95,10 +91,11 @@ jig_protected_list() {
 }
 
 jig_engine_rules() {
-  local text protected
+  local text protected verify
   text="$(cat "$jig_rules_file")" || return 1
   protected="$(jig_protected_list)"
-  text="${text//@VERIFY@/$profile_verify}"
+  verify="cd /workspace && $(jig_profile_command "$profile_verify")"
+  text="${text//@VERIFY@/$verify}"
   printf '%s\n' "${text//@PROTECTED@/$protected}"
 }
 

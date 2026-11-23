@@ -1,4 +1,5 @@
 jig_interrupted=0
+list_max=50
 
 jig_fail() {
   echo "$jig_name: $*" >&2
@@ -29,6 +30,24 @@ printable() {
   printf '%s' "${s//\`/?}"
 }
 
+jig_say() {
+  local line
+  while IFS= read -r line; do
+    echo "$jig_name: $line"
+  done < <("$@")
+}
+
+jig_warn() {
+  local line
+  jig_warnings=""
+  while IFS= read -r line; do
+    line="WARNING: $(printable "$line")"
+    echo "$jig_name: $line" >&2
+    jig_warnings="$jig_warnings$line
+"
+  done < <("$@")
+}
+
 jig_docker_name() {
   printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C tr -c 'a-z0-9-' '-'
 }
@@ -50,12 +69,6 @@ jig_repo_identity() {
 jig_clone() {
   local rev="$1" dest="$2"
   git clone --quiet --no-local -c advice.detachedHead=false --revision="$rev" "$repo_root" "$dest"
-}
-
-jig_extract_profile() {
-  local rev="$1" dest="$2"
-  mkdir "$dest" && git -C "$repo_root" archive --format=tar "$rev" .jig | tar -x -f - -C "$dest" || return 1
-  jig_compose_files=(-f "$dest/.jig/compose.yml")
 }
 
 jig_compose() {

@@ -123,9 +123,14 @@ equals "protected list: always-protected paths first, covered entries left out" 
   - `deploy/*`
   - `*/CLAUDE.md`'
 
+jig_parse_profile cfg <<<"base main
+setup .jig/setup
+verify .jig/verify
+protect CLAUDE.md"
 rules="$(jig_engine_rules)"
 checks=$(( checks + 1 ))
-[[ $rules == *'Run `./bin/verify` yourself'* ]] || fail "the engine rules name the verify command: $rules"
+[[ $rules == *'Run `cd /workspace && /jig/profile/verify` yourself'* ]] ||
+  fail "the engine rules give the profile's verify command with its working directory: $rules"
 checks=$(( checks + 1 ))
 [[ $rules == *"
 $(jig_protected_list)
