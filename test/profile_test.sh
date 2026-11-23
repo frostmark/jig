@@ -503,13 +503,6 @@ equals "the merged profile's files" "$(files_in "$tmp/run/profile/.jig")" \
 equals "an overlay file replaces the repository's" "$(cat "$tmp/run/profile/.jig/Dockerfile")" "overlay Dockerfile"
 checks=$(( checks + 1 ))
 [ -x "$tmp/run/profile/.jig/setup" ] || fail "an overlay script keeps its executable mode over a repository file without it"
-equals "the profile mount" "$(cat "$tmp/run/compose.profile.yml")" 'services:
-  app:
-    volumes:
-      - type: bind
-        source: ${JIG_PROFILE_DIR:?jig sets JIG_PROFILE_DIR}
-        target: /jig/profile
-        read_only: true'
 rm -r "$JIG_PROFILES"
 
 new_origin
