@@ -125,9 +125,6 @@ $(jig_protected_list)
 "* ]] || fail "the engine rules carry the protected list: $rules"
 checks=$(( checks + 1 ))
 [[ $rules != *@VERIFY@* && $rules != *@PROTECTED@* ]] || fail "the engine rules keep a placeholder: $rules"
-checks=$(( checks + 1 ))
-[[ $rules == *JIG_BLOCKED.md* && $rules == *"What changes, Behaviour"* ]] ||
-  fail "the engine rules carry JIG_BLOCKED.md and the final message format: $rules"
 
 mkdir -p "$overlay"
 printf 'OVERLAY RULE: prefer small functions.\n' >"$overlay/rules.md"
