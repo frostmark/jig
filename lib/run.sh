@@ -174,6 +174,19 @@ elapsed() {
   echo "$(( s / 60 ))m $(( s % 60 ))s"
 }
 
+jig_find_overlay
+harness=""
+while IFS= read -r line; do
+  harness="$harness$(printable "$line")
+"
+done < <(jig_harness_sources; jig_harness_shadows | sed 's/^/WARNING: /')
+while IFS= read -r line; do
+  case "$line" in
+    WARNING:*) echo "$jig_name: $line" >&2 ;;
+    *) echo "$jig_name: $line" ;;
+  esac
+done < <(printf "%s" "$harness")
+
 mkdir -p "$(dirname "$run")" || jig_fail "could not create $(dirname "$run")"
 mkdir "$run" || jig_fail "could not create $run"
 jig_extract_profile "$base" "$run/profile" || die "could not extract .jig/ of $base into $run/profile"
@@ -402,6 +415,12 @@ body="$run/pr-body.md"
     echo
     printf '%s' "$attention"
   fi
+  echo
+  echo "## Harness"
+  echo
+  echo '```'
+  printf '%s' "$harness"
+  echo '```'
   echo
   echo "## Agent summary"
   echo
