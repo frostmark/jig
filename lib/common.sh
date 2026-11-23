@@ -70,12 +70,6 @@ jig_clone() {
   git clone --quiet --no-local -c advice.detachedHead=false --revision="$rev" "$repo_root" "$dest"
 }
 
-jig_extract_profile() {
-  local rev="$1" dest="$2"
-  mkdir "$dest" && git -C "$repo_root" archive --format=tar "$rev" .jig | tar -x -f - -C "$dest" || return 1
-  jig_compose_files=(-f "$dest/.jig/compose.yml")
-}
-
 jig_compose() {
   docker compose -p "$jig_project" "${jig_compose_files[@]}" "$@"
 }
