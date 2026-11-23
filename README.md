@@ -185,14 +185,23 @@ jig writes `system-prompt.md` (the engine rules, then the overlay's `rules.md`) 
 and `plugin/` at `/jig/overlay` in `app`, both read-only and outside `/workspace`, and starts the agent
 with `--append-system-prompt-file /jig/system-prompt.md` and, when there is a plugin,
 `--plugin-dir /jig/overlay`. The plugin directory is mounted as it is on disk, so edits to it during a
-run reach the agent.
+run are visible in the container.
 
 ### What wins
 
-Nothing replaces anything: the agent gets the repository's harness, the engine rules and the overlay
-together. In the system prompt the overlay's rules come after the engine rules. Plugin skills and agents
-carry the plugin's prefix, so an overlay skill named like one in the repository does not hide it: the
-agent sees both (`review` and `overlay:review`).
+The agent gets the repository's harness, the engine rules and the overlay together. In the system prompt
+the overlay's rules come after the engine rules. Plugin skills and agents carry the plugin's prefix, so
+an overlay skill named like one in the repository does not hide it: the agent sees both (`review` and
+`overlay:review`).
+
+Whole plugins are another matter. Claude Code tells plugins apart by the `name` in their manifest (an
+overlay plugin without one is `overlay`), and a plugin loaded with `--plugin-dir`, as the overlay plugin
+is, replaces an installed marketplace plugin or a skills-directory plugin
+(`.claude/skills/<dir>/.claude-plugin/plugin.json`) of the same name
+([name conflicts](https://code.claude.com/docs/en/plugins/loading#name-conflicts)). That is the case
+when a plugin moves from the overlay into the repository under the same name while the overlay still
+has it: the agent gets the overlay's copy and not the repository's. Remove the plugin from the overlay
+when it moves; jig does not compare plugin names.
 
 At start `jig run` prints where each item comes from and warns when an overlay skill or agent has the
 same name as one in the base commit's `.claude/skills/<name>/` or `.claude/agents/<name>.md`:
@@ -231,13 +240,14 @@ current directory. `JIG_HOME` (an absolute path, `~/.jig` by default) holds run 
 
 What `jig run` does: precondition checks → the profile from `origin/<base>` → the overlay lookup and the
 harness sources printed → the system prompt and the compose override written to the run directory → a
-clone of that commit in `$JIG_HOME/runs/<owner>/<repo>/<slug>/repo` → compose project `jig-run_<owner>_<repo>_<slug>` (no ports
-on the host; owner and repo lowercased, characters other than latin letters, digits and `-` turned into
-`-`) → the plan commit and `setup` in the container → `claude -p` under the time limit → the branch
-leaves the container as a bundle → uncommitted changes are discarded (`git checkout -f`, `git clean -fd`,
-also in the middle of an abandoned merge or rebase) and `verify` runs on the committed branch →
-`docker compose down -v` (always: on errors and on Ctrl-C, even a repeated one) and removal of the clone →
-on the host: fetch the branch, check it, `git push origin`, `gh pr create --base <base>`.
+clone of that commit in `$JIG_HOME/runs/<owner>/<repo>/<slug>/repo` → compose project
+`jig-run_<owner>_<repo>_<slug>` (no ports on the host; owner and repo lowercased, characters other than
+latin letters, digits and `-` turned into `-`) → the plan commit and `setup` in the container →
+`claude -p` under the time limit → the branch leaves the container as a bundle → uncommitted changes are
+discarded (`git checkout -f`, `git clean -fd`, also in the middle of an abandoned merge or rebase) and
+`verify` runs on the committed branch → `docker compose down -v` (always: on errors and on Ctrl-C, even a
+repeated one) and removal of the clone → on the host: fetch the branch, check it, `git push origin`,
+`gh pr create --base <base>`.
 
 The PR is opened as a draft if `verify` is red, the time limit hit, the agent exited with an error, left
 `JIG_BLOCKED.md` or uncommitted changes, changed a protected path (`.jig/`, the `setup` and `verify`
@@ -345,7 +355,8 @@ it was pushed).
 
 `test/profile_test.sh` checks the `.jig/config` parser, the protected-path matching, loading the
 profile from a commit, finding the base on a local bare `origin`, and starting `bin/jig` through a
-symlink. `test/harness_test.sh` checks the overlay lookup and its validation, the rendered engine rules,
-the system prompt, the compose override, the agent's arguments and the name warnings. Both need bash and
-git 2.28 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
+symlink. `test/harness_test.sh` checks the overlay lookup and its validation (a relative `JIG_PROFILES`
+stops `jig run` before the credential check), the rendered engine rules, the system prompt, the compose
+override, the agent's arguments, the name warnings and the harness report on the terminal and in the PR.
+Both need bash and git 2.28 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
