@@ -16,6 +16,7 @@ branch="jig/$slug"
 minutes="${JIG_TIMEOUT:-60}"
 [[ $minutes =~ $minutes_re ]] || jig_fail "JIG_TIMEOUT must be a positive whole number of minutes"
 jig_set_home
+jig_set_profiles
 
 if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   jig_fail "both CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are set; unset one of them.

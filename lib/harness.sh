@@ -2,13 +2,16 @@ jig_rules_file="$engine_root/lib/rules.md"
 jig_prompt_target=/jig/system-prompt.md
 jig_plugin_target=/jig/overlay
 
-jig_find_overlay() {
-  local root="${JIG_PROFILES:-$jig_home/profiles}"
-  case "$root" in
+jig_set_profiles() {
+  overlay_root="${JIG_PROFILES:-$jig_home/profiles}"
+  case "$overlay_root" in
     /*) ;;
     *) jig_fail "JIG_PROFILES must be an absolute path" ;;
   esac
-  overlay_dir="$root/$gh_owner/$gh_name"
+}
+
+jig_find_overlay() {
+  overlay_dir="$overlay_root/$gh_owner/$gh_name"
   overlay_rules=""
   overlay_plugin=""
   [ -e "$overlay_dir" ] || [ -L "$overlay_dir" ] || return 0

@@ -49,6 +49,7 @@ overlay="$profiles/acme/shop"
 
 find_in() {
   JIG_PROFILES="$1"
+  jig_set_profiles
   jig_find_overlay
 }
 
@@ -58,10 +59,18 @@ found() {
 
 unset JIG_PROFILES
 equals "the overlay root defaults to JIG_HOME/profiles" \
-  "$( (jig_find_overlay && printf '%s|%s|%s' "$overlay_dir" "$overlay_rules" "$overlay_plugin") 2>&1)" \
+  "$( (jig_set_profiles && jig_find_overlay && printf '%s|%s|%s' "$overlay_dir" "$overlay_rules" "$overlay_plugin") 2>&1)" \
   "$tmp/home/profiles/acme/shop||"
 equals "no overlay directory: no rules, no plugin" "$(found "$profiles")" "$overlay||"
-exits_2 "a relative JIG_PROFILES" "JIG_PROFILES must be an absolute path" find_in profiles
+git init -q "$tmp/target"
+printf '# Add a health check\n' >"$tmp/add-health-check.md"
+checks=$(( checks + 1 ))
+out="$(cd "$tmp" && env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY JIG_HOME="$tmp/home" JIG_PROFILES=profiles \
+  "$root/bin/jig" run add-health-check.md --repo "$tmp/target" 2>&1)"
+status=$?
+if [ "$status" != 2 ] || [ "$out" != "jig: JIG_PROFILES must be an absolute path" ]; then
+  fail "a relative JIG_PROFILES stops jig run before the credential check: exit $status (output: $out)"
+fi
 
 mkdir -p "$overlay/plugin/skills/review"
 equals "an overlay with only a plugin" "$(found "$profiles")" "$overlay||$overlay/plugin"
