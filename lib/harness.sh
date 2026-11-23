@@ -14,6 +14,8 @@ jig_find_overlay() {
   overlay_dir="$overlay_root/$gh_owner/$gh_name"
   overlay_rules=""
   overlay_plugin=""
+  overlay_files=()
+  overlay_config=""
   [ -e "$overlay_dir" ] || [ -L "$overlay_dir" ] || return 0
   [ -d "$overlay_dir" ] || jig_fail "the overlay $overlay_dir must be a directory"
   if [ -e "$overlay_dir/rules.md" ] || [ -L "$overlay_dir/rules.md" ]; then
@@ -25,6 +27,7 @@ jig_find_overlay() {
     [ -d "$overlay_dir/plugin" ] || jig_fail "the overlay plugin $overlay_dir/plugin must be a directory"
     overlay_plugin="$overlay_dir/plugin"
   fi
+  jig_find_overlay_profile
 }
 
 jig_harness_sources() {
@@ -95,10 +98,11 @@ jig_protected_list() {
 }
 
 jig_engine_rules() {
-  local text protected
+  local text protected verify
   text="$(cat "$jig_rules_file")" || return 1
   protected="$(jig_protected_list)"
-  text="${text//@VERIFY@/$profile_verify}"
+  verify="$(jig_profile_command "$profile_verify")"
+  text="${text//@VERIFY@/$verify}"
   printf '%s\n' "${text//@PROTECTED@/$protected}"
 }
 

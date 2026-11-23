@@ -44,6 +44,8 @@ export GIT_AUTHOR_EMAIL="$git_email" GIT_COMMITTER_EMAIL="$git_email"
 docker info >/dev/null 2>&1 || jig_fail "Docker is not running"
 gh auth status --hostname github.com >/dev/null 2>&1 || jig_fail "gh is not logged in to github.com: run gh auth login"
 
+jig_repo_identity
+jig_find_overlay
 jig_resolve_base
 
 if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$branch"; then
@@ -60,7 +62,6 @@ if git -C "$repo_root" cat-file -e "$base:plans/$slug.md" 2>/dev/null; then
   jig_fail "plans/$slug.md already exists on $base_branch: pick another plan file name"
 fi
 
-jig_repo_identity
 run="$jig_home/runs/$gh_owner/$gh_name/$slug"
 [ ! -e "$run" ] || jig_fail "run directory $run already exists: remove it (rm -rf) to reuse the name"
 
@@ -169,12 +170,11 @@ elapsed() {
   echo "$(( s / 60 ))m $(( s % 60 ))s"
 }
 
-jig_find_overlay
 jig_harness_report
 
 mkdir -p "$(dirname "$run")" || jig_fail "could not create $(dirname "$run")"
 mkdir "$run" || jig_fail "could not create $run"
-jig_extract_profile "$base" "$run/profile" || die "could not extract .jig/ of $base into $run/profile"
+jig_extract_profile "$base" "$run" || die "could not put the profile of $base and the overlay into $run/profile"
 jig_use_harness "$run/compose.harness.yml" "$run/system-prompt.md" || die "could not write the harness files into $run"
 jig_clone "$base" "$run/repo" || die "git clone failed"
 mkdir -p "$run/repo/plans" || die "could not create $run/repo/plans"
@@ -192,7 +192,7 @@ jig_compose exec -T -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME
   sh "$branch" "$slug" || die "could not commit the plan in the container"
 
 echo "$jig_name: preparing the environment with $profile_setup (log: $run/setup.log)"
-jig_compose exec -T app "./$profile_setup" >"$run/setup.log" 2>&1 || die "$profile_setup failed: see $run/setup.log"
+jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_setup")" >"$run/setup.log" 2>&1 || die "$profile_setup failed: see $run/setup.log"
 
 prompt="Implement the plan in plans/$slug.md."
 
@@ -232,7 +232,7 @@ jig_compose exec -T app \
 
 echo "$jig_name: running $profile_verify on the committed $branch (log: $run/verify.log)"
 verify_status=0
-jig_compose exec -T app "./$profile_verify" >"$run/verify.log" 2>&1 || verify_status=$?
+jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_verify")" >"$run/verify.log" 2>&1 || verify_status=$?
 [ "$verify_status" != 130 ] || exit 130
 echo "$jig_name: $profile_verify exit $verify_status"
 

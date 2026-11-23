@@ -1,8 +1,10 @@
 jig_check_host
 jig_set_home
+jig_set_profiles
 head="$(git -C "$repo_root" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" || jig_fail "$repo_root has no commits"
-jig_load_profile "$head" HEAD
 jig_repo_identity
+jig_find_overlay
+jig_load_profile "$head" HEAD
 
 run="$jig_home/smoke/$gh_owner/$gh_name"
 jig_project="jig-smoke_$docker_repo"
@@ -19,14 +21,14 @@ finish() {
 
 rm -rf "$run"
 mkdir -p "$run"
-jig_extract_profile "$head" "$run/profile"
+jig_extract_profile "$head" "$run"
 jig_clone "$head" "$run/repo"
 
 jig_use_workspace "$run/repo"
 trap finish EXIT
 jig_compose up -d --build --wait
-jig_compose exec -T app "./$profile_setup"
-jig_compose exec -T app "./$profile_verify"
+jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_setup")"
+jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_verify")"
 
 changes="$(jig_compose exec -T app git status --porcelain)"
 if [ -n "$changes" ]; then
