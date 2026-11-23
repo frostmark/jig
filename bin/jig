@@ -15,6 +15,7 @@ engine_root="$(cd "$(dirname "$self")/.." >/dev/null && pwd)"
 jig_name="jig"
 . "$engine_root/lib/common.sh"
 . "$engine_root/lib/profile.sh"
+. "$engine_root/lib/harness.sh"
 
 usage() {
   echo "usage: jig run <plan.md> [--repo <path>]" >&2
