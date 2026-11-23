@@ -116,7 +116,7 @@ jig_engine_rules() {
   local text protected verify
   text="$(cat "$jig_rules_file")" || return 1
   protected="$(jig_protected_list)"
-  verify="$(jig_profile_command "$profile_verify")"
+  verify="cd /workspace && $(jig_profile_command "$profile_verify")"
   text="${text//@VERIFY@/$verify}"
   printf '%s\n' "${text//@PROTECTED@/$protected}"
 }

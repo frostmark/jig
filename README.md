@@ -83,8 +83,9 @@ there is one, otherwise the base commit's. jig mounts the whole profile read-onl
 the `app` service and runs `.jig/setup` as `/jig/profile/setup`, always with `/workspace` as the
 working directory, so a script finds the repository through the working directory, not through its own
 path (`cd "$(dirname "$0")/.."` leads to `/jig`). Any other value is a repository file: it must exist
-in the base commit and runs as `./<path>` from the clone. The engine rules give the agent the same
-command for `verify`.
+in the base commit and runs as `./<path>` from the clone. The engine rules give the agent the `verify`
+command with its working directory, `cd /workspace && /jig/profile/verify` or
+`cd /workspace && ./scripts/verify`, so it runs in the right place even after the agent changed directory.
 
 ### Where jig reads the profile from
 
@@ -207,8 +208,9 @@ on the current branch and push nothing, leave nothing uncommitted, run `verify` 
 result, do not weaken tests, do not touch the protected paths or `.github/`, never print the
 environment, add a dependency only if the plan names it, write the final message as What changes,
 Behaviour changes, Not done, How to check (it becomes the PR description), and write `JIG_BLOCKED.md` when
-the plan cannot be done. jig fills in the `verify` command (`./<path>`, or `/jig/profile/<rest>` for a
-path under `.jig/`) and the run's protected paths: `.jig/*`, the `setup` and `verify` scripts,
+the plan cannot be done. jig fills in the `verify` command with its working directory
+(`cd /workspace && ./<path>`, or `cd /workspace && /jig/profile/<rest>` for a path under `.jig/`) and the
+run's protected paths: `.jig/*`, the `setup` and `verify` scripts,
 `plans/<slug>.md` and the `protect` list of the profile's config, leaving out an entry that an earlier
 one already covers; the rules say that `JIG_BLOCKED.md` is allowed even when a
 pattern matches it. The draft decision below checks the same list. The prompt itself only names the plan
