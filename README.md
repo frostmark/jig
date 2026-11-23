@@ -148,10 +148,12 @@ jig: WARNING: the overlay's Dockerfile replaces the repository's .jig/Dockerfile
 ```
 
 The overlay commit is `git -C $JIG_PROFILES rev-parse HEAD`, printed when the repository has an overlay
-directory. When that directory has uncommitted changes or untracked files (`git status`; ignored files
-do not count), jig warns `the overlay has uncommitted changes in acme/shop, and this run uses them`;
-when `JIG_PROFILES` is not a git repository with a commit, it warns that the overlay's version cannot be
-recorded. Neither stops the run. `jig run` puts the same lines in the PR description under "Profile",
+directory and `JIG_PROFILES` is the top level of a git repository; a directory inside another repository
+(a dotfiles repository that ignores `~/.jig`, for example) does not count. When the overlay directory has
+uncommitted changes or untracked files (`git status`; ignored files do not count), jig warns
+`the overlay has uncommitted changes in acme/shop, and this run uses them`; when `JIG_PROFILES` is not a
+git repository with a commit, or the overlay directory is a link out of it, it warns that the overlay's
+version cannot be recorded. Neither stops the run. `jig run` puts the same lines in the PR description under "Profile",
 with the overlay's paths as `$JIG_PROFILES/acme/shop/...` instead of host paths.
 
 ### Compose contract

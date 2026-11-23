@@ -16,6 +16,7 @@ jig_find_overlay() {
   overlay_plugin=""
   overlay_files=()
   overlay_config=""
+  overlay_git=""
   [ -e "$overlay_dir" ] || [ -L "$overlay_dir" ] || return 0
   [ -d "$overlay_dir" ] || jig_fail "the overlay $overlay_dir must be a directory"
   if [ -e "$overlay_dir/rules.md" ] || [ -L "$overlay_dir/rules.md" ]; then

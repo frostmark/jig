@@ -207,7 +207,7 @@ target="$tmp/target"
 gh_owner=acme
 gh_name=shop
 jig_home="$tmp/home"
-export JIG_PROFILES="$tmp/profiles"
+export JIG_PROFILES="$tmp/home/profiles"
 overlay="$JIG_PROFILES/acme/shop"
 jig_set_profiles
 jig_find_overlay
@@ -573,12 +573,38 @@ WARNING: JIG_PROFILES is not a git repository with a commit, so the PR cannot na
 WARNING: the overlay's config replaces the repository's .jig/config
 \`\`\`"
 git init -q -b main "$JIG_PROFILES"
+equals "an overlay repository without a commit" "$(warned)" "jig: WARNING: JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version
+jig: WARNING: the overlay's config replaces the repository's .jig/config"
+rm -rf "$JIG_PROFILES/.git"
+git init -q -b main "$jig_home"
+printf 'profiles/\n' >"$jig_home/.gitignore"
+git -C "$jig_home" add .gitignore && git -C "$jig_home" commit -q -m dotfiles
+equals "an overlay root inside another git repository" "$(warned)" "jig: WARNING: JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version
+jig: WARNING: the overlay's config replaces the repository's .jig/config"
+rm -rf "$jig_home/.git" "$jig_home/.gitignore"
+
+told() {
+  (jig_find_overlay && load_head && jig_profile_report 2>&1) 2>&1
+}
+
+git init -q -b main "$JIG_PROFILES"
 git -C "$JIG_PROFILES" commit -q --allow-empty -m empty
 mv "$overlay" "$tmp/shop-overlay"
 ln -s "$tmp/shop-overlay" "$overlay"
-equals "an overlay directory outside the overlay repository" "$(warned)" "jig: WARNING: could not check the overlay acme/shop for uncommitted changes (git status failed)
+equals "an overlay directory outside the overlay repository has no overlay commit" "$(told)" "jig: profile .jig/Dockerfile: overlay $overlay/Dockerfile
+jig: profile .jig/compose.yml: repository
+jig: profile .jig/config: overlay $overlay/config
+jig: profile .jig/x?y/notes: repository
+jig: WARNING: the overlay acme/shop is outside the git repository JIG_PROFILES, so the PR cannot name its version
 jig: WARNING: the overlay's config replaces the repository's .jig/config"
-rm -rf "$JIG_PROFILES" "$tmp/shop-overlay"
+rm "$overlay"
+mv "$tmp/shop-overlay" "$overlay"
+git -C "$JIG_PROFILES" add -A && git -C "$JIG_PROFILES" commit -q -m overlay
+tree="$(git -C "$JIG_PROFILES" rev-parse 'HEAD^{tree}')"
+rm "$JIG_PROFILES/.git/objects/${tree:0:2}/${tree:2}"
+equals "git status fails in the overlay" "$(warned)" "jig: WARNING: could not check the overlay acme/shop for uncommitted changes (git status failed)
+jig: WARNING: the overlay's config replaces the repository's .jig/config"
+rm -rf "$JIG_PROFILES"
 
 mkdir "$tmp/bin" "$tmp/links"
 ln -s "$root/bin/jig" "$tmp/links/jig"

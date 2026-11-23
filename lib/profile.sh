@@ -60,8 +60,19 @@ jig_parse_profile() {
 
 jig_profile_target=/jig/profile
 
+jig_overlay_git() {
+  local root top
+  root="$(cd "$overlay_root" && pwd -P)" || jig_fail "could not resolve the overlay root $overlay_root"
+  overlay_git=none
+  top="$(git -C "$overlay_root" rev-parse --show-toplevel 2>/dev/null)" && [ "$top" = "$root" ] || return 0
+  overlay_git=outside
+  top="$(git -C "$overlay_dir" rev-parse --show-toplevel 2>/dev/null)" && [ "$top" = "$root" ] || return 0
+  overlay_git=inside
+}
+
 jig_find_overlay_profile() {
   local names f
+  jig_overlay_git
   names="$(cd "$overlay_dir" && LC_ALL=C find -L . -mindepth 1 \( -path ./rules.md -o -path ./plugin \) -prune -o ! -type d -print)" ||
     jig_fail "could not list the files of the overlay $overlay_dir"
   [ -n "$names" ] || return 0
@@ -162,6 +173,10 @@ jig_overlay_version() {
   overlay_commit=""
   overlay_changes=""
   [ -d "$overlay_dir" ] || return 0
+  case "$overlay_git" in
+    none) overlay_changes=unrecorded; return 0 ;;
+    outside) overlay_changes=outside; return 0 ;;
+  esac
   if ! overlay_commit="$(git -C "$overlay_root" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null)"; then
     overlay_commit=""
     overlay_changes=unrecorded
@@ -175,6 +190,7 @@ jig_overlay_version() {
 jig_overlay_warnings() {
   case "$overlay_changes" in
     unrecorded) echo "JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version" ;;
+    outside) echo "the overlay $gh_owner/$gh_name is outside the git repository JIG_PROFILES, so the PR cannot name its version" ;;
     unknown) echo "could not check the overlay $gh_owner/$gh_name for uncommitted changes (git status failed)" ;;
     uncommitted) echo "the overlay has uncommitted changes in $gh_owner/$gh_name, and this run uses them" ;;
   esac
