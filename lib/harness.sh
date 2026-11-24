@@ -156,7 +156,7 @@ jig_pr_body() {
   if [ $(( ${#open} + ${#text} + 16 )) -gt "$room" ]; then
     open='<details><summary>Plan (cut)</summary>'
     note="*The plan is cut here: it has $(wc -c <"$plan" | tr -d ' ') bytes, the whole plan is in \`$plan\`.*"
-    text="$(awk -v max=$(( room - ${#open} - ${#note} - 17 )) '{ n += length($0) + 1; if (n > max) exit; print }' "$plan")" ||
+    text="$(LC_ALL=C awk -v max=$(( room - ${#open} - ${#note} - 17 )) '{ n += length($0) + 1; if (n > max) exit; print }' "$plan")" ||
       return 1
     text="${text:+$text
 

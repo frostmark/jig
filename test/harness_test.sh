@@ -280,10 +280,12 @@ bytes() {
 }
 fill 101 p >"$tmp/run/fits.md"
 fill 102 p >"$tmp/run/over.md"
+utf8="$(locale -a 2>/dev/null | grep -i -m 1 -E '^(c|en_us)\.utf-?8$')"
+rest="$(printf '\342\206\222%.0s' $(seq 1 16))rr"
 equals "a body of exactly the limit keeps the whole plan" \
-  "$( (jig_pr_body_max=200 && jig_pr_body "$tmp/run/fits.md" "$(fill 50 r)" | bytes) 2>&1)" 200
-equals "a plan one byte over the limit is cut" \
-  "$( (jig_pr_body_max=200 && jig_pr_body "$tmp/run/over.md" "$(fill 50 r)" | sed -n 1p) 2>&1)" \
+  "$( (export LC_ALL="${utf8:-C}" && jig_pr_body_max=200 && jig_pr_body "$tmp/run/fits.md" "$rest" | bytes) 2>&1)" 200
+equals "a plan one byte over the limit is cut, multibyte characters counted in bytes" \
+  "$( (export LC_ALL="${utf8:-C}" && jig_pr_body_max=200 && jig_pr_body "$tmp/run/over.md" "$rest" | sed -n 1p) 2>&1)" \
   "<details><summary>Plan (cut)</summary>"
 
 for n in a b c d e f g h i j k l m n o p q r s t; do
