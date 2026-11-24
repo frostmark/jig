@@ -159,6 +159,8 @@ jig_write_profile_compose() {
   {
     echo "services:"
     echo "  app:"
+    echo "    environment:"
+    echo "      JIG_BASE: \${JIG_BASE:?jig sets JIG_BASE}"
     echo "    volumes:"
     echo "      - type: bind"
     echo "        source: \${JIG_PROFILE_DIR:?jig sets JIG_PROFILE_DIR}"

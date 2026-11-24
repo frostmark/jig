@@ -76,7 +76,7 @@ jig_compose() {
 }
 
 jig_use_workspace() {
-  export JIG_WORKSPACE="$1" JIG_UID="$(id -u)" JIG_GID="$(id -g)"
+  export JIG_WORKSPACE="$1" JIG_BASE="$2" JIG_UID="$(id -u)" JIG_GID="$(id -g)"
 }
 
 # docker compose turns SIGINT back on even when the caller ignores it, so down runs in its own

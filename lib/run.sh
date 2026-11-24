@@ -177,7 +177,7 @@ jig_use_harness "$run/compose.harness.yml" "$run/system-prompt.md" "$run/plan.md
   die "could not write the harness files into $run"
 jig_clone "$base" "$run/repo" || die "git clone failed"
 
-jig_use_workspace "$run/repo"
+jig_use_workspace "$run/repo" "$base"
 trap finish EXIT
 
 echo "$jig_name: starting compose project $jig_project"
