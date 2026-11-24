@@ -3,7 +3,6 @@ jig_prompt_target=/jig/system-prompt.md
 jig_plugin_target=/jig/overlay
 jig_plan_target=/jig/plan.md
 jig_plan_prompt="Implement the plan in $jig_plan_target."
-jig_pr_body_max=65536
 
 jig_set_profiles() {
   overlay_root="${JIG_PROFILES:-$jig_home/profiles}"
@@ -145,22 +144,4 @@ jig_use_harness() {
     jig_harness_args+=(--plugin-dir "$jig_plugin_target")
   fi
   jig_compose_files+=(-f "$compose_file")
-}
-
-# Sizes are counted in bytes, which are never fewer than the characters GitHub counts.
-jig_pr_body() {
-  local plan="$1" rest="$2" LC_ALL=C
-  local open='<details><summary>Plan</summary>' text note room
-  text="$(cat "$plan")" || return 1
-  room=$(( jig_pr_body_max - ${#rest} - 1 ))
-  if [ $(( ${#open} + ${#text} + 16 )) -gt "$room" ]; then
-    open='<details><summary>Plan (cut)</summary>'
-    note="*The plan is cut here: it has $(wc -c <"$plan" | tr -d ' ') bytes, the whole plan is in \`$plan\`.*"
-    text="$(LC_ALL=C awk -v max=$(( room - ${#open} - ${#note} - 17 )) '{ n += length($0) + 1; if (n > max) exit; print }' "$plan")" ||
-      return 1
-    text="${text:+$text
-
-}$note"
-  fi
-  printf '%s\n\n%s\n\n</details>\n\n%s\n' "$open" "$text" "$rest"
 }

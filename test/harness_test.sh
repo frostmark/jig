@@ -7,6 +7,7 @@ jig_name=jig
 . "$root/lib/common.sh"
 . "$root/lib/profile.sh"
 . "$root/lib/harness.sh"
+. "$root/lib/pr.sh"
 
 failures=0
 checks=0
