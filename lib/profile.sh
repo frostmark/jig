@@ -289,7 +289,7 @@ jig_resolve_base() {
 }
 
 jig_protected_patterns() {
-  protected_patterns=(".jig/*" "$profile_setup" "$profile_verify" "plans/$slug.md" ${profile_protect[@]+"${profile_protect[@]}"})
+  protected_patterns=(".jig/*" "$profile_setup" "$profile_verify" ${profile_protect[@]+"${profile_protect[@]}"})
 }
 
 jig_protected() {

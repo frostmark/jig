@@ -105,7 +105,6 @@ ln -s "$tmp/missing" "$overlay"
 exits_2 "the repository's overlay is a dangling link" "the overlay $overlay must be a directory" find_in "$profiles"
 rm "$overlay"
 
-slug=add-health-check
 jig_parse_profile cfg <<<"base main
 setup .jig/setup
 verify bin/verify
@@ -118,7 +117,6 @@ protect */CLAUDE.md"
 equals "protected list: always-protected paths first, covered entries left out" "$(jig_protected_list)" \
   '  - `.jig/*`
   - `bin/verify`
-  - `plans/add-health-check.md`
   - `CLAUDE.md`
   - `deploy/*`
   - `*/CLAUDE.md`'
@@ -151,21 +149,29 @@ OVERLAY RULE: prefer small functions."
 
 overlay_plugin=""
 jig_write_harness_compose "$tmp/harness.yml"
-equals "the compose override without a plugin mounts only the system prompt" "$(cat "$tmp/harness.yml")" 'services:
+equals "the compose override without a plugin mounts the system prompt and the plan" "$(cat "$tmp/harness.yml")" 'services:
   app:
     volumes:
       - type: bind
         source: ${JIG_SYSTEM_PROMPT:?jig sets JIG_SYSTEM_PROMPT}
         target: /jig/system-prompt.md
+        read_only: true
+      - type: bind
+        source: ${JIG_PLAN:?jig sets JIG_PLAN}
+        target: /jig/plan.md
         read_only: true'
 overlay_plugin="$overlay/plugin"
 jig_write_harness_compose "$tmp/harness.yml"
-equals "the compose override with a plugin mounts it read-only" "$(cat "$tmp/harness.yml")" 'services:
+equals "the compose override with a plugin mounts it read-only too" "$(cat "$tmp/harness.yml")" 'services:
   app:
     volumes:
       - type: bind
         source: ${JIG_SYSTEM_PROMPT:?jig sets JIG_SYSTEM_PROMPT}
         target: /jig/system-prompt.md
+        read_only: true
+      - type: bind
+        source: ${JIG_PLAN:?jig sets JIG_PLAN}
+        target: /jig/plan.md
         read_only: true
       - type: bind
         source: ${JIG_OVERLAY_PLUGIN:?jig sets JIG_OVERLAY_PLUGIN}
@@ -174,15 +180,17 @@ equals "the compose override with a plugin mounts it read-only" "$(cat "$tmp/har
 
 used() {
   jig_compose_files=(-f profile.yml)
-  jig_use_harness "$tmp/harness.yml" "$tmp/prompt.md" &&
-    printf '%s|%s|%s|%s' "${jig_harness_args[*]}" "${jig_compose_files[*]}" "$JIG_SYSTEM_PROMPT" "${JIG_OVERLAY_PLUGIN-unset}"
+  jig_use_harness "$tmp/harness.yml" "$tmp/prompt.md" "$tmp/run/plan.md" &&
+    printf '%s|%s|%s|%s|%s' "${jig_harness_args[*]}" "${jig_compose_files[*]}" "$JIG_SYSTEM_PROMPT" "$JIG_PLAN" \
+      "${JIG_OVERLAY_PLUGIN-unset}"
 }
 overlay_plugin=""
 equals "agent arguments without a plugin" "$( (unset JIG_OVERLAY_PLUGIN; used) 2>&1)" \
-  "--append-system-prompt-file /jig/system-prompt.md|-f profile.yml -f $tmp/harness.yml|$tmp/prompt.md|unset"
+  "--append-system-prompt-file /jig/system-prompt.md|-f profile.yml -f $tmp/harness.yml|$tmp/prompt.md|$tmp/run/plan.md|unset"
 overlay_plugin="$overlay/plugin"
 equals "agent arguments with a plugin" "$( (unset JIG_OVERLAY_PLUGIN; used) 2>&1)" \
-  "--append-system-prompt-file /jig/system-prompt.md --plugin-dir /jig/overlay|-f profile.yml -f $tmp/harness.yml|$tmp/prompt.md|$overlay/plugin"
+  "--append-system-prompt-file /jig/system-prompt.md --plugin-dir /jig/overlay|-f profile.yml -f $tmp/harness.yml|$tmp/prompt.md|$tmp/run/plan.md|$overlay/plugin"
+equals "the prompt names the mounted plan" "$jig_plan_prompt" "Implement the plan in /jig/plan.md."
 
 repo_root="$tmp/repo"
 git init -q -b main "$repo_root"
@@ -249,6 +257,72 @@ overlay rules: none (no $JIG_PROFILES/acme/shop/rules.md)
 overlay plugin: none (no $JIG_PROFILES/acme/shop/plugin)
 ```
 '
+
+mkdir "$tmp/run"
+printf '# Add a health check\n\nAnswer `GET /health` with 200.\n' >"$tmp/run/plan.md"
+equals "the PR body opens with the plan in a collapsed block" "$(jig_pr_body "$tmp/run/plan.md" '- verify: green
+## Agent summary')" '<details><summary>Plan</summary>
+
+# Add a health check
+
+Answer `GET /health` with 200.
+
+</details>
+
+- verify: green
+## Agent summary'
+
+fill() {
+  printf "%$1s" '' | tr ' ' "$2"
+}
+bytes() {
+  LC_ALL=C wc -c | tr -d ' '
+}
+fill 101 p >"$tmp/run/fits.md"
+fill 102 p >"$tmp/run/over.md"
+equals "a body of exactly the limit keeps the whole plan" \
+  "$( (jig_pr_body_max=200 && jig_pr_body "$tmp/run/fits.md" "$(fill 50 r)" | bytes) 2>&1)" 200
+equals "a plan one byte over the limit is cut" \
+  "$( (jig_pr_body_max=200 && jig_pr_body "$tmp/run/over.md" "$(fill 50 r)" | sed -n 1p) 2>&1)" \
+  "<details><summary>Plan (cut)</summary>"
+
+for n in a b c d e f g h i j k l m n o p q r s t; do
+  printf 'line %s \342\206\222\n' "$n"
+done >"$tmp/run/plan.md"
+cut_at() {
+  (cd "$tmp/run" && jig_pr_body_max=$1 && jig_pr_body plan.md rest) 2>&1
+}
+equals "a cut plan keeps the whole lines that fit and names its copy" "$(cut_at 166)" '<details><summary>Plan (cut)</summary>
+
+line a →
+line b →
+line c →
+
+*The plan is cut here: it has 220 bytes, the whole plan is in `plan.md`.*
+
+</details>
+
+rest'
+equals "the cut body fills the limit exactly" "$(cut_at 166 | bytes)" 166
+equals "a line that would pass the limit by one byte is left out" "$(cut_at 165 | sed -n 3,6p)" 'line a →
+line b →
+
+*The plan is cut here: it has 220 bytes, the whole plan is in `plan.md`.*'
+equals "no room left: the block holds only the note" "$( (cd "$tmp/run" && jig_pr_body_max=10 && jig_pr_body plan.md rest | sed -n 3p) 2>&1)" \
+  '*The plan is cut here: it has 220 bytes, the whole plan is in `plan.md`.*'
+
+for n in $(seq 1 3000); do
+  printf 'Step %s: change the handler and its spec.\n' "$n"
+done >"$tmp/run/plan.md"
+rest="$(fill 40000 s)
+🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+jig_pr_body "$tmp/run/plan.md" "$rest" >"$tmp/run/pr-body.md"
+checks=$(( checks + 1 ))
+size="$(bytes <"$tmp/run/pr-body.md")"
+[ "$size" -le 65536 ] && [ "$size" -gt 65400 ] ||
+  fail "a long plan next to a 40,000-byte summary fills GitHub's 65,536 characters without passing them: $size bytes"
+equals "the rest of the body follows the cut plan whole" "$(tail -n 1 "$tmp/run/pr-body.md")" \
+  "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]
