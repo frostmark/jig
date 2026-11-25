@@ -233,7 +233,8 @@ stream_args="--dangerously-skip-permissions --output-format stream-json --verbos
 fake_meta='success, turns: 3, estimated cost $0.01'
 
 mkdir "$tmp/logs"
-printf '%s\n' 'not json' '{"type":"system","subtype":"init","model":"claude-fake-1"}' \
+printf '%s\n' 'not json' '{"type":"system","subtype":"hook","model":"claude-fake-7"}' \
+  '{"type":"system","subtype":"init","model":"claude-fake-1"}' \
   '{"type":"system","subtype":"init","model":"claude-fake-9"}' '{"type":"assistant","message":{"model":"claude-fake-8"}}' \
   '{"type":"result","subtype":"success","is_error":false,"num_turns":4,"total_cost_usd":0.12,"modelUsage":{"claude-fake-1":{},"claude-fake-mini":{},"has space":{},"x`y":{},"-dash":{}}}' \
   >"$tmp/logs/1-init-and-result"

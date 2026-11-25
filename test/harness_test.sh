@@ -549,6 +549,7 @@ equals "an Issue line under a second-level heading is not read" "$(issue '## Not
 equals "a plan without a heading has no Issue line" "$(issue 'Issue: #12\n')" ""
 equals "a lowercase issue line is not read" "$(issue '# Title\n\nissue: #12\n')" ""
 equals "an Issue word without a colon is not read" "$(issue '# Title\n\nIssues #12\n')" ""
+equals "a sentence that mentions an Issue line is not read" "$(issue '# Title\n\nSee Issue: #12\n')" ""
 
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]
