@@ -128,6 +128,11 @@ elif grep -q -x GITHUB-REVERT /jig/plan.md; then
   git commit -q -m "Add health.txt"
   : >left-behind.txt
   result "What changes: health.txt says ok."
+elif grep -q -x NOT-FROM-BASE /jig/plan.md; then
+  echo ok >health.txt
+  git add health.txt
+  git reset -q --soft "$(git commit-tree "$(git write-tree)" -m "Start over without the base")"
+  result "What changes: health.txt says ok."
 elif grep -q -x LEAK-STATUS /jig/plan.md; then
   echo ok >health.txt
   git add health.txt
@@ -641,6 +646,16 @@ has_line "a branch run without commits says no branch was fetched" "$tmp/err" \
   "jig: the agent made no commits on jig/branch-nothing (agent exit 0): no branch was fetched into $target."
 nothing_pushed branch-nothing
 no_gh "a branch run without commits"
+
+printf '# Start over\n\nNOT-FROM-BASE\n' >"$tmp/plans/branch-unrooted.md"
+jig run "$tmp/plans/branch-unrooted.md"
+equals "a branch run whose branch does not start from the base exits 3" "$?" 3
+equals "a branch that does not start from the base stops jig before its credential scan" "$(tail -n 2 "$tmp/err")" \
+  "jig: jig/branch-unrooted does not start from main ($base)
+jig: run directory kept: $runs/branch-unrooted"
+nothing_pushed branch-unrooted
+no_gh "a branch run whose branch does not start from the base"
+fetch_head_kept branch-unrooted
 
 printf '# Leave the credential\n\nLEAK-STATUS\n' >"$tmp/plans/branch-leak.md"
 jig run "$tmp/plans/branch-leak.md"

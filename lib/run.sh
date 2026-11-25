@@ -86,10 +86,14 @@ die() {
 }
 
 refuse() {
-  git -C "$repo_root" branch -q -D "$branch" >/dev/null 2>&1 ||
-    echo "$jig_name: could not delete the local branch $branch: delete it by hand" >&2
+  local kept="no local branch $branch was created"
+  if [ "$fetched" = 1 ]; then
+    git -C "$repo_root" branch -q -D "$branch" >/dev/null 2>&1 ||
+      echo "$jig_name: could not delete the local branch $branch: delete it by hand" >&2
+    kept="the local branch $branch was deleted"
+  fi
   fetched=0
-  die "$* Nothing was pushed; the local branch $branch was deleted."
+  die "$* Nothing was pushed; $kept."
 }
 
 contains_cred() {
@@ -279,12 +283,13 @@ if [ "$commits" = 0 ]; then
   die "the agent made no commits on $branch (agent exit $agent_status): no branch was fetched into $repo_root."
 fi
 
-git -C "$repo_root" -c transfer.fsckObjects=true -c fetch.fsckObjects=true \
-  fetch --quiet --no-write-fetch-head "$run/branch.bundle" "refs/heads/$branch:refs/heads/$branch" || { rm -f "$run/branch.bundle"; die "could not fetch $branch from the bundle"; }
-fetched=1
-
 g() { git -C "$repo_root" "$@"; }
-tip="$(g rev-parse --verify "refs/heads/$branch^{commit}")" || die "could not resolve $branch"
+g -c transfer.fsckObjects=true -c fetch.fsckObjects=true \
+  fetch --quiet --no-write-fetch-head "$run/branch.bundle" "refs/heads/$branch" || { rm -f "$run/branch.bundle"; die "could not fetch $branch from the bundle"; }
+heads="$(g bundle list-heads "$run/branch.bundle" "refs/heads/$branch")" || die "could not list the heads of $run/branch.bundle"
+tip="${heads%% *}"
+[ "$heads" = "$tip refs/heads/$branch" ] && [[ $tip =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] &&
+  tip="$(g rev-parse --verify --quiet "$tip^{commit}")" || die "could not resolve $branch in $run/branch.bundle"
 g merge-base --is-ancestor "$base" "$tip" || die "$branch does not start from $base_branch ($base)"
 
 g log -p --text --diff-merges=first-parent --format=fuller "$base..$tip" >"$run/branch.patch" ||
@@ -292,6 +297,8 @@ g log -p --text --diff-merges=first-parent --format=fuller "$base..$tip" >"$run/
 g rev-list --objects --no-object-names "$base..$tip" | g cat-file --batch >"$run/branch.objects" ||
   die "could not read the objects of $branch"
 refuse_leaks branch.patch branch.objects summary.md blocked-worktree.md
+g update-ref "refs/heads/$branch" "$tip" "" || die "could not create $branch in $repo_root"
+fetched=1
 
 g log -z --format= --name-only --no-renames --diff-merges=first-parent "$base..$tip" >"$run/touched.z" ||
   die "git log failed on $branch"

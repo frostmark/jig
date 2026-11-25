@@ -421,9 +421,11 @@ latin letters, digits and `-` turned into `-`) → the branch `jig/<slug>` and `
 `claude -p` under the time limit, with `--model` and `--effort` when set → the branch leaves the container as a bundle → uncommitted changes are
 discarded (`git checkout -f`, `git clean -fd`, also in the middle of an abandoned merge or rebase) and
 `verify` runs on the committed branch → `docker compose down -v` (always: on errors and on Ctrl-C, even a
-repeated one) and removal of the clone → on the host: fetch the branch into the target repository (a new
-ref only: its working tree, index and current branch stay as they are), check it, and with `deliver pr`
-`git push origin` and `gh pr create --base <base>`; with `deliver branch` write `report.md`.
+repeated one) and removal of the clone → on the host: fetch the branch's commits from the bundle into the
+target repository, check that they start from the base and scan them for the credential, and only then
+create `jig/<slug>` there (a new ref only: its working tree, index and current branch stay as they are; a
+run that stops before the scan leaves no branch) → with `deliver pr` `git push origin` and
+`gh pr create --base <base>`; with `deliver branch` write `report.md`.
 
 The PR description starts with the plan's issue line (`Fixes #123` or `Issue: ABC-123`, see
 [Plan](#plan)), then the result of `verify`, the agent, the duration and the path of `claude.log`. The
@@ -457,7 +459,8 @@ look (an uncommitted `JIG_BLOCKED.md` in `blocked-worktree.md`, uncommitted chan
 agent's final message in `summary.md`) and exits with code 3. No branch is created in the target
 repository.
 
-jig pushes nothing (exit code 3, the local branch `jig/<slug>` is deleted):
+jig pushes nothing (exit code 3; the local branch `jig/<slug>` is deleted, or never created when the
+branch itself carries the credential):
 
 - if the model credential's value is found in the objects that would be pushed (`branch.objects`: whole
   commits with any headers, trees and files), in the branch diff (`branch.patch`), in the agent's final
