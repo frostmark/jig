@@ -278,8 +278,10 @@ service name with characters other than lowercase latin letters, digits and `-` 
 characters turned into `-`, and a checksum of the original name added), so its old images are removed
 too; compose's own name would differ per run (`jig-run_<owner>_<repo>_<slug>-app`). The same file sets
 `pull_policy: never` for the services that build, so `docker compose up` runs the image jig has just built
-and never pulls one over it, whatever `pull_policy` the profile gives. jig never touches other images or the build cache, and Docker skips an image
-that a container still uses.
+and never pulls one over it, whatever `pull_policy` the profile gives. The prune removes every dangling image
+labelled `jig.repo=<owner>/<repo>`, and labels pass to images built `FROM` a jig image: a dangling image
+you built on top of one is removed too. Images without that label and the build cache are never touched,
+and Docker skips an image that a container still uses.
 
 ### Build secrets
 
@@ -733,8 +735,9 @@ it was pushed).
 - One run at a time; parallel runs are not supported.
 - The image is built locally for the host's architecture, and the first build takes minutes; there is no
   build cache or prebuilt image in a registry.
-- jig removes only the dangling images labelled with the repository. The build cache, and images built
-  before jig labelled them, stay until `docker builder prune` and `docker image prune`.
+- jig removes only the dangling images labelled with the repository, among them dangling images built
+  `FROM` a jig image, which inherit its label. The build cache, and images built before jig labelled them,
+  stay until `docker builder prune` and `docker image prune`.
 - The agent's limit is 60 minutes by default (`JIG_TIMEOUT`); `verify` after the agent has no limit.
 - No follow-up on review comments and no automatic fixing: a new run is a new plan and slug.
 - `verify` is repeated on the committed branch, but ignored files (dependency directories, build caches)
