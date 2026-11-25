@@ -321,7 +321,8 @@ Then `jig run` and `jig smoke`:
   (see [Usage](#usage)), and the run directory's logs get `[REDACTED]` in its place. The build's output is
   redacted before it reaches the terminal and `build.log`, so a `RUN` step that prints a secret shows
   `[REDACTED]`. jig matches each value as a fixed string of any characters, and a value with `\` or `"`
-  also in the form that JSON gives it in `claude.log`. A value never goes on the command line of a
+  also in the form that JSON gives it in `claude.log`; where one value holds another, the longer one is
+  replaced first, on the terminal and in every log. A value never goes on the command line of a
   command jig runs, where other users of the host could see it in `ps`: `grep`, `awk` and `sed` read the
   values from a pipe.
 

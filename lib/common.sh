@@ -51,15 +51,20 @@ jig_warn() {
 jig_secret_names=()
 jig_secret_values=()
 
+jig_insert_secret() {
+  local i=0 LC_ALL=C
+  while [ "$i" -lt "${#jig_secret_values[@]}" ] && [ "${#jig_secret_values[i]}" -ge "${#2}" ]; do
+    i=$(( i + 1 ))
+  done
+  jig_secret_names=(${jig_secret_names[@]+"${jig_secret_names[@]:0:i}"} "$1" ${jig_secret_names[@]+"${jig_secret_names[@]:i}"})
+  jig_secret_values=(${jig_secret_values[@]+"${jig_secret_values[@]:0:i}"} "$2" ${jig_secret_values[@]+"${jig_secret_values[@]:i}"})
+}
+
 jig_add_secret() {
   local escaped
-  jig_secret_names+=("$1")
-  jig_secret_values+=("$2")
+  jig_insert_secret "$1" "$2"
   escaped="$(printf '%s' "$2" | LC_ALL=C sed 's/[\\"]/\\&/g')"
-  [ "$escaped" = "$2" ] || {
-    jig_secret_names+=("$1")
-    jig_secret_values+=("$escaped")
-  }
+  [ "$escaped" = "$2" ] || jig_insert_secret "$1" "$escaped"
 }
 
 jig_contains_secret() {
@@ -113,11 +118,6 @@ jig_all_secrets() {
 }
 
 jig_redact_awk='NR == FNR { if ($0 != "") v[++n] = $0; next }
-!sorted {
-  for (i = 2; i <= n; i++)
-    for (j = i; j > 1 && length(v[j]) > length(v[j - 1]); j--) { t = v[j]; v[j] = v[j - 1]; v[j - 1] = t }
-  sorted = 1
-}
 {
   line = $0
   for (i = 1; i <= n; i++) {
