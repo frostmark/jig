@@ -28,6 +28,7 @@ usage() {
   echo "  JIG_EFFORT=<level>     run: Claude Code's --effort (low, medium, high, xhigh, max), over the profile's effort" >&2
   echo "  JIG_HOME=<dir>         where run and smoke directories live (default ~/.jig)" >&2
   echo "  JIG_PROFILES=<dir>     the personal overlay root (default \$JIG_HOME/profiles)" >&2
+  echo "  BUILDX_BUILDER=<name>  the builder for the image (default: the builder of the current Docker context)" >&2
   echo "  CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (exactly one) authenticates the agent in run" >&2
   exit 2
 }

@@ -950,5 +950,31 @@ done
 equals "the refusal does not print the value" "$(read_secrets E2E_LINE | grep -c -e '^b' -e 'a	b')" 0
 unset E2E_A E2E_B E2E_EMPTY E2E_LINE E2E_TAB E2E_CR
 
+docker() {
+  printf '%s\n' "$*" >>"$tmp/docker.calls"
+  case "$1 $2" in
+    "context show") [ "$docker_context" != fail ] && echo "$docker_context" ;;
+    *) return 1 ;;
+  esac
+}
+builder() {
+  rm -f "$tmp/docker.calls"
+  (jig_use_builder && printf '%s|%s|%s' "$BUILDX_BUILDER" "$jig_builder_text" "$(env | grep '^BUILDX_BUILDER=')") 2>&1
+}
+docker_context=desktop-linux
+equals "without BUILDX_BUILDER jig builds with the Docker context's own builder, for its own commands" "$(env -u BUILDX_BUILDER bash -c true; unset BUILDX_BUILDER; builder)" \
+  "desktop-linux|desktop-linux, the builder of the Docker context|BUILDX_BUILDER=desktop-linux"
+equals "jig only asks Docker for the context" "$(cat "$tmp/docker.calls")" "context show"
+equals "an empty BUILDX_BUILDER counts as unset" "$(BUILDX_BUILDER='' builder)" \
+  "desktop-linux|desktop-linux, the builder of the Docker context|BUILDX_BUILDER=desktop-linux"
+equals "a BUILDX_BUILDER that is set is left alone" "$(BUILDX_BUILDER=mybuilder builder; echo "|$(cat "$tmp/docker.calls" 2>/dev/null)")" \
+  "mybuilder|mybuilder from BUILDX_BUILDER|BUILDX_BUILDER=mybuilder|"
+equals "the builder's name is printable" "$(BUILDX_BUILDER=$'my\033builder' builder | cut -d'|' -f2)" "my?builder from BUILDX_BUILDER"
+docker_context=fail
+exits_2 "a context that cannot be read stops jig" \
+  "jig: could not read the current Docker context (docker context show), whose builder jig builds with: set BUILDX_BUILDER to a builder" \
+  env -u BUILDX_BUILDER bash -c "$(declare -f docker jig_use_builder jig_fail printable); jig_name=jig tmp='$tmp' docker_context=fail; jig_use_builder"
+unset docker_context
+
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]
