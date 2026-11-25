@@ -14,6 +14,7 @@ branch="jig/$slug"
 
 minutes="${JIG_TIMEOUT:-60}"
 [[ $minutes =~ $minutes_re ]] || jig_fail "JIG_TIMEOUT must be a positive whole number of minutes"
+jig_check_agent_env
 jig_set_home
 jig_set_profiles
 
@@ -46,6 +47,7 @@ gh auth status --hostname github.com >/dev/null 2>&1 || jig_fail "gh is not logg
 jig_repo_identity
 jig_find_overlay
 jig_resolve_base
+jig_agent_options
 
 if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$branch"; then
   jig_fail "branch $branch already exists locally: pick another plan file name or git -C $repo_root branch -D $branch"
@@ -191,6 +193,7 @@ jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_setup")" 
 
 prompt="$jig_plan_prompt"
 
+echo "$jig_name: agent $(jig_agent_settings)"
 echo "$jig_name: agent running, up to $minutes min (log: $run/claude.log)"
 agent_started=$(date +%s)
 agent_status=0
@@ -199,7 +202,7 @@ agent_status=0
   jig_compose exec -T -e "$cred_name" \
     -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME -e GIT_COMMITTER_EMAIL app \
     timeout -k 60 "${minutes}m" \
-    claude -p "$prompt" "${jig_harness_args[@]}" --dangerously-skip-permissions --output-format stream-json --verbose
+    claude -p "$prompt" "${jig_harness_args[@]}" ${jig_agent_args[@]+"${jig_agent_args[@]}"} --dangerously-skip-permissions --output-format stream-json --verbose
 ) </dev/null >"$run/claude.log" 2>&1 || agent_status=$?
 # On Ctrl-C docker compose exec exits with 130 instead of dying from SIGINT, so bash skips its INT trap.
 [ "$agent_status" != 130 ] || exit 130

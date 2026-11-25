@@ -133,6 +133,31 @@ jig_write_harness_compose() {
   } >"$1"
 }
 
+jig_check_agent_env() {
+  [ -z "${JIG_MODEL:-}" ] || jig_valid_model "$JIG_MODEL" || jig_fail "JIG_MODEL $jig_model_rule"
+  [ -z "${JIG_EFFORT:-}" ] || jig_valid_effort "$JIG_EFFORT" || jig_fail "JIG_EFFORT $jig_effort_rule"
+}
+
+jig_agent_options() {
+  jig_model="${JIG_MODEL:-$profile_model}"
+  jig_model_source=JIG_MODEL
+  [ -n "${JIG_MODEL:-}" ] || jig_model_source="the profile"
+  jig_effort="${JIG_EFFORT:-$profile_effort}"
+  jig_effort_source=JIG_EFFORT
+  [ -n "${JIG_EFFORT:-}" ] || jig_effort_source="the profile"
+  jig_agent_args=()
+  [ -z "$jig_model" ] || jig_agent_args+=(--model "$jig_model")
+  [ -z "$jig_effort" ] || jig_agent_args+=(--effort "$jig_effort")
+}
+
+jig_setting() {
+  if [ -n "$1" ]; then printf '%s (from %s)' "$1" "$2"; else printf default; fi
+}
+
+jig_agent_settings() {
+  printf 'model: %s, effort: %s' "$(jig_setting "$jig_model" "$jig_model_source")" "$(jig_setting "$jig_effort" "$jig_effort_source")"
+}
+
 jig_use_harness() {
   local compose_file="$1" prompt_file="$2" plan_file="$3"
   jig_write_system_prompt "$prompt_file" || return 1

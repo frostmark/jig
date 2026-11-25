@@ -73,6 +73,19 @@ if [ "$status" != 2 ] || [ "$out" != "jig: JIG_PROFILES must be an absolute path
   fail "a relative JIG_PROFILES stops jig run before the credential check: exit $status (output: $out)"
 fi
 
+run_with() {
+  (cd "$tmp" && env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY -u JIG_MODEL -u JIG_EFFORT JIG_HOME="$tmp/home" \
+    JIG_PROFILES=profiles "$@" "$root/bin/jig" run add-health-check.md --repo "$tmp/target" 2>&1)
+}
+exits_2 "a JIG_EFFORT that is not a level stops jig run before the credential check" \
+  "jig: JIG_EFFORT must be one of low, medium, high, xhigh, max" run_with JIG_EFFORT=extreme
+exits_2 "a JIG_MODEL outside the model characters stops jig run before the credential check" \
+  "jig: JIG_MODEL must be a Claude Code model name or alias" run_with 'JIG_MODEL=opus --verbose'
+exits_2 "a valid JIG_MODEL and JIG_EFFORT pass on to the next check" \
+  "jig: JIG_PROFILES must be an absolute path" run_with 'JIG_MODEL=sonnet[1m]' JIG_EFFORT=xhigh
+exits_2 "an empty JIG_MODEL and JIG_EFFORT count as unset" \
+  "jig: JIG_PROFILES must be an absolute path" run_with JIG_MODEL= JIG_EFFORT=
+
 mkdir -p "$overlay/plugin/skills/review"
 equals "an overlay with only a plugin" "$(found "$profiles")" "$overlay||$overlay/plugin"
 printf 'Prefer small functions.\n' >"$overlay/rules.md"
@@ -192,6 +205,30 @@ overlay_plugin="$overlay/plugin"
 equals "agent arguments with a plugin" "$( (unset JIG_OVERLAY_PLUGIN; used) 2>&1)" \
   "--append-system-prompt-file /jig/system-prompt.md --plugin-dir /jig/overlay|-f profile.yml -f $tmp/harness.yml|$tmp/prompt.md|$tmp/run/plan.md|$overlay/plugin"
 equals "the prompt names the mounted plan" "$jig_plan_prompt" "Implement the plan in /jig/plan.md."
+
+agent_options() {
+  (
+    profile_model="$1" profile_effort="$2"
+    unset JIG_MODEL JIG_EFFORT
+    [ "$3" = unset ] || export JIG_MODEL="$3"
+    [ "$4" = unset ] || export JIG_EFFORT="$4"
+    jig_agent_options && printf '%s|%s' "${jig_agent_args[*]+${jig_agent_args[*]}}" "$(jig_agent_settings)"
+  ) 2>&1
+}
+equals "no model or effort: no arguments, Claude Code's defaults" "$(agent_options "" "" unset unset)" \
+  "|model: default, effort: default"
+equals "the profile's model and effort" "$(agent_options opus high unset unset)" \
+  "--model opus --effort high|model: opus (from the profile), effort: high (from the profile)"
+equals "JIG_MODEL and JIG_EFFORT override the profile" "$(agent_options opus high 'sonnet[1m]' max)" \
+  "--model sonnet[1m] --effort max|model: sonnet[1m] (from JIG_MODEL), effort: max (from JIG_EFFORT)"
+equals "JIG_EFFORT alone overrides only the effort" "$(agent_options opus high unset low)" \
+  "--model opus --effort low|model: opus (from the profile), effort: low (from JIG_EFFORT)"
+equals "JIG_MODEL without a profile model, no effort" "$(agent_options "" "" claude-opus-5-5 unset)" \
+  "--model claude-opus-5-5|model: claude-opus-5-5 (from JIG_MODEL), effort: default"
+equals "only an effort from the profile" "$(agent_options "" medium unset unset)" \
+  "--effort medium|model: default, effort: medium (from the profile)"
+equals "empty JIG_MODEL and JIG_EFFORT leave the profile's values" "$(agent_options opus high "" "")" \
+  "--model opus --effort high|model: opus (from the profile), effort: high (from the profile)"
 
 repo_root="$tmp/repo"
 git init -q -b main "$repo_root"
