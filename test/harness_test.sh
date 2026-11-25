@@ -1040,6 +1040,10 @@ home_mount=''
 equals "a filesystem name with spaces alone is read right" "$(disk)" ""
 home_fs='' home_mount='/Volumes/My 1 2 3% Disk'
 equals "a mount point with spaces and numbers is read right" "$(disk)" ""
+home_fs='//nas/share 1 2 5%' home_mount='' home_kib=$(( 19 * gib ))
+exits_2 "a filesystem name with numbers and a percentage is not taken for the sizes" \
+  "jig: the filesystem of JIG_HOME ($tmp/home/.jig) has 19.0 GiB free, less than JIG_MIN_FREE_GB=20." disk
+home_fs='' home_kib=$(( 20 * gib ))
 home_mount='' home_kib=$(( 3 * gib / 2 ))
 disk_env "JIG_MIN_FREE_GB sets the limit" "has 1.5 GiB free, less than JIG_MIN_FREE_GB=2." JIG_MIN_FREE_GB=2
 equals "JIG_MIN_FREE_GB=1 passes 1.5 GiB" "$(JIG_MIN_FREE_GB=1 disk)" ""
