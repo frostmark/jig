@@ -1040,8 +1040,8 @@ home_mount=''
 equals "a filesystem name with spaces alone is read right" "$(disk)" ""
 home_fs='' home_mount='/Volumes/My 1 2 3% Disk'
 equals "a mount point with spaces and numbers is read right" "$(disk)" ""
-home_fs='//nas/share 1 2 5%' home_mount='' home_kib=$(( 19 * gib ))
-exits_2 "a filesystem name with numbers and a percentage is not taken for the sizes" \
+home_fs='1 2 3 4% //nas/share 5 6 7%' home_mount='' home_kib=$(( 19 * gib ))
+exits_2 "a filesystem name with numbers and percentages is not taken for the sizes" \
   "jig: the filesystem of JIG_HOME ($tmp/home/.jig) has 19.0 GiB free, less than JIG_MIN_FREE_GB=20." disk
 home_fs='' home_kib=$(( 20 * gib ))
 home_mount='' home_kib=$(( 3 * gib / 2 ))
@@ -1248,7 +1248,7 @@ jig-acme-inc-2169544754_my-repo-3261712207-web-api-2221479482
 jig-acme-inc-2169544754_my-repo-3261712207-397289535
 jig-acme-inc-2169544754_my-repo-3261712207-db-1"
 equals "image names are valid Docker repository names" \
-  "$(gh_repo=x/.-_ image_names A -a- a..b 9 | LC_ALL=C grep -c -v -E '^[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*$')" 0
+  "$( (gh_repo=x/.-_ image_names A -a- a..b 9; gh_repo=x/.github image_names a) | LC_ALL=C grep -c -v -E '^[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*$')" 0
 fixture=no_build
 equals "without a service that builds there is no label file" "$(inspect; [ -e "$tmp/compose/compose.build.yml" ] && echo ' file')" \
   "ok||-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml"
