@@ -177,6 +177,15 @@ mkdir -p "$(dirname "$run")" || jig_fail "could not create $(dirname "$run")"
 mkdir "$run" || jig_fail "could not create $run"
 jig_extract_profile "$base" "$run" || die "could not put the profile of $base and the overlay into $run/profile"
 cp "$plan_abs" "$run/plan.md" || die "could not copy the plan to $run/plan.md"
+issue_status=0
+jig_plan_issue "$run/plan.md" || issue_status=$?
+if [ "$issue_status" = 2 ]; then
+  rm -rf "$run"
+  jig_fail "the Issue line of $plan still has the template's placeholder (a < or >): write #123 or a tracker ID, or delete the line"
+fi
+[ "$issue_status" = 0 ] || die "could not read the Issue line of $run/plan.md"
+echo "$jig_name: issue: $issue_text"
+jig_warn jig_issue_warnings
 jig_use_harness "$run/compose.harness.yml" "$run/system-prompt.md" "$run/plan.md" ||
   die "could not write the harness files into $run"
 jig_clone "$base" "$run/repo" || die "git clone failed"
@@ -325,7 +334,6 @@ fi
 
 title="$(sed -n 's/^# //p' "$run/plan.md" | sed -n 1p)" || die "could not read the title of $run/plan.md"
 [ -n "$title" ] || title="$slug"
-issue_line="$(jig_pr_issue "$run/plan.md")" || die "could not read the Issue line of $run/plan.md"
 
 reasons=""
 attention=""

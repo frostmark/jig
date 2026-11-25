@@ -572,9 +572,12 @@ equals "the attribution follows the cut plan" "$(tail -n 3 "$tmp/run/pr-body.md"
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 
-issue() {
+plan_issue() {
   printf "$1" >"$tmp/run/issue.md"
-  jig_pr_issue "$tmp/run/issue.md" 2>&1
+  jig_plan_issue "$tmp/run/issue.md"
+}
+issue() {
+  (plan_issue "$1" && printf '%s' "$issue_line") 2>&1
 }
 equals "an issue of the repository becomes Fixes" "$(issue '# Add a health check\n\nIssue: #12\n\nWhy.\n')" "Fixes #12"
 equals "the Issue line right under the title, without a blank line" "$(issue '# Title\nIssue: #12\n')" "Fixes #12"
@@ -591,15 +594,57 @@ equals "a passed-through reference is printable" "$(issue '# Title\n\nIssue: ABC
 equals "a passed-through reference is cut to 200 bytes" "$(issue "# Title\n\nIssue: $(fill 250 x)\n" | bytes)" 207
 equals "no Issue line" "$(issue '# Title\n\nWhy.\n\n## Links\n\n- #12\n')" ""
 equals "an empty Issue line" "$(issue '# Title\n\nIssue: \t\n\nWhy.\n')" ""
-equals "an Issue line after the first paragraph is not read" "$(issue '# Title\n\nWhy.\n\nIssue: #12\n')" ""
-equals "an Issue line before the title is not read" "$(issue 'Issue: #12\n# Title\n')" ""
-equals "an Issue line under a later heading is not read" "$(issue '# Title\n\nWhy.\n\n# Second\n\nIssue: #12\n')" ""
-equals "an Issue line under a second-level heading is not read" "$(issue '## Notes\n\nIssue: #12\n')" ""
-equals "a plan without a heading has no Issue line" "$(issue 'Issue: #12\n')" ""
-equals "a lowercase issue line is not read" "$(issue '# Title\n\nissue: #12\n')" ""
-equals "an Issue word without a colon is not read" "$(issue '# Title\n\nIssue #12\n')" ""
-equals "a longer word that starts with Issue is not read" "$(issue '# Title\n\nIssues: #12\n')" ""
-equals "a sentence that mentions an Issue line is not read" "$(issue '# Title\n\nSee Issue: #12\n')" ""
+
+launch() {
+  (plan_issue "$1" && printf '%s' "$issue_text") 2>&1
+}
+equals "the launch names the issue that the PR fixes" "$(launch '# Title\n\nIssue: #12\n')" "Fixes #12"
+equals "the launch names another reference as text" "$(launch '# Title\n\nIssue: ABC-1`id`\n')" "ABC-1?id? (as text)"
+equals "the launch says when there is no issue" "$(launch '# Title\n\nWhy.\n')" "none"
+
+placeholder() {
+  (plan_issue "$1"; echo "$?") 2>&1
+}
+equals "the template's placeholder left in the Issue line is refused" "$(placeholder '# Title\n\nIssue: <ref>\n')" 2
+equals "a < in the reference is refused" "$(placeholder '# Title\n\nIssue: ABC<123\n')" 2
+equals "a > in the reference is refused" "$(placeholder '# Title\n\nIssue: ABC->123\n')" 2
+equals "a placeholder on a line jig does not read is no error" "$(placeholder '# Title\n\nWhy.\n\nIssue: <ref>\n')" 0
+sed 's/^Issue: <ref>$/Issue: #12/' "$root/plans/TEMPLATE.md" >"$tmp/run/template.md"
+equals "the filled template gives Fixes and no warnings" \
+  "$( (jig_plan_issue "$tmp/run/template.md" && printf '%s|%s' "$issue_line" "$(jig_issue_warnings)") 2>&1)" "Fixes #12|"
+equals "the template as is is refused" "$( (jig_plan_issue "$root/plans/TEMPLATE.md"; echo "$?") 2>&1)" 2
+
+unread() {
+  (plan_issue "$1" && printf '%s|%s' "$issue_line" "$(jig_issue_warnings)") 2>&1
+}
+warning() {
+  printf "the plan's line %s is not read as its Issue line: %s (jig reads \"Issue: <ref>\" only as the first line under the title)" "$1" "$2"
+}
+equals "an Issue line after the first paragraph is not read" "$(unread '# Title\n\nWhy.\n\nIssue: #12\n')" "|$(warning 5 'Issue: #12')"
+equals "an Issue line before the title is not read" "$(unread 'Issue: #12\n# Title\n')" "|$(warning 1 'Issue: #12')"
+equals "an Issue line under a later heading is not read" "$(unread '# Title\n\nWhy.\n\n# Second\n\nIssue: #12\n')" \
+  "|$(warning 7 'Issue: #12')"
+equals "an Issue line under a second-level heading is not read" "$(unread '## Notes\n\nIssue: #12\n')" "|$(warning 3 'Issue: #12')"
+equals "a lowercase issue line is not read" "$(unread '# Title\n\nissue: #12\n')" "|$(warning 3 'issue: #12')"
+equals "an indented Issue line is not read" "$(unread '# Title\n\n  Issue: #12\n')" "|$(warning 3 '  Issue: #12')"
+equals "a bold Issue line is not read" "$(unread '# Title\n\nWhy.\n\n**Issue:** #5\n')" "|$(warning 5 '**Issue:** #5')"
+equals "an Issue word without a colon is not read" "$(unread '# Title\n\nIssue #12\n')" "|$(warning 3 'Issue #12')"
+equals "a longer word that starts with Issue is not read" "$(unread '# Title\n\nIssues: #12\n')" "|$(warning 3 'Issues: #12')"
+equals "a sentence that mentions an Issue line is not read" "$(unread '# Title\n\nSee Issue: #12\n')" \
+  "|$(warning 3 'See Issue: #12')"
+equals "a list item with an Issue label is not read" "$(unread '# Title\n\nWhy.\n\n- _issue_: #12\n')" \
+  "|$(warning 5 '- _issue_: #12')"
+equals "a second Issue line is not read" "$(unread '# Title\n\nIssue: #12\n\nIssue: #13\n')" "Fixes #12|$(warning 5 'Issue: #13')"
+equals "each line that is not read is named" "$(unread 'issue: #1\n# Title\n\nWhy.\n\nIssue: #12\n')" \
+  "|$(warning 1 'issue: #1')
+$(warning 6 'Issue: #12')"
+equals "a line that is not read is named without its CR" "$(unread '# Title\r\n\r\nWhy.\r\n\r\nissue: #12\r\n')" \
+  "|$(warning 5 'issue: #12')"
+equals "a line that is not read is named in 200 printable bytes" \
+  "$(unread "# Title\n\nWhy.\n\nIssue: \`$(fill 250 x)\n")" "|$(warning 5 "Issue: ?$(fill 189 x)...")"
+equals "the word issue in prose, a heading or a plural label is no Issue line" \
+  "$(unread '# Title\n\nIssue: #12\n\nThis fixes the issue where it fails.\n\nKnown issues: none.\n\n## Issue: notes\n\n# Issue: another title\n')" \
+  "Fixes #12|"
 
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]

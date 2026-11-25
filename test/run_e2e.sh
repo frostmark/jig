@@ -318,6 +318,7 @@ has_line "the agent sees the prompt, the read-only plan and JIG_BASE on a branch
   '{"type":"system","subtype":"fake","msg":"fake claude: the prompt names /jig/plan.md, the plan is read-only, JIG_BASE is HEAD ('"$base"') on jig/add-health"}'
 has_line "without a model or an effort jig passes neither" "$runs/add-health/claude.log" \
   '{"type":"system","subtype":"fake","msg":"args: '"$harness_args $stream_args"'"}'
+has_line "the terminal names the issue the PR fixes before the agent starts" "$tmp/out" "jig: issue: Fixes #12"
 has_line "the terminal says Claude Code's defaults apply before the agent starts" "$tmp/out" \
   "jig: agent model: default, effort: default"
 has_line "the terminal names the model from the log and the default effort next to turns and cost" "$tmp/out" \
@@ -366,9 +367,12 @@ Write ok to health.txt.
 
 $attribution"
 
-printf '# Do nothing\n\nNO-COMMIT\n' >"$tmp/plans/nothing-to-do.md"
+printf '# Do nothing\n\nNO-COMMIT\n\n**Issue:** #5\n' >"$tmp/plans/nothing-to-do.md"
 jig run "$tmp/plans/nothing-to-do.md"
 equals "a run without commits exits 3" "$?" 3
+has_line "a plan without an Issue line names no issue at launch" "$tmp/out" "jig: issue: none"
+has_line "a misplaced Issue line is named in a warning at launch" "$tmp/err" \
+  "jig: WARNING: the plan's line 5 is not read as its Issue line: **Issue:** #5 (jig reads \"Issue: <ref>\" only as the first line under the title)"
 has_line "a run without commits says so" "$tmp/err" \
   "jig: the agent made no commits on jig/nothing-to-do (agent exit 0): nothing was pushed and no PR was opened."
 has_line "a run without commits names the model and effort next to turns and cost" "$tmp/out" \
@@ -379,6 +383,16 @@ equals "the uncommitted JIG_BLOCKED.md is kept" "$(cat "$runs/nothing-to-do/bloc
 checks=$(( checks + 1 ))
 [ ! -e "$runs/nothing-to-do/verify.log" ] || fail "a run without commits runs no final verify"
 nothing_pushed nothing-to-do
+
+printf '# Keep the placeholder\n\nIssue: <ref>\n\nWrite ok to health.txt.\n' >"$tmp/plans/placeholder.md"
+jig run "$tmp/plans/placeholder.md"
+equals "the template's placeholder in the Issue line stops the run with exit 2" "$?" 2
+equals "the placeholder is named as the last thing on the terminal" "$(tail -n 1 "$tmp/err")" \
+  "jig: the Issue line of $tmp/plans/placeholder.md still has the template's placeholder (a < or >): write #123 or a tracker ID, or delete the line"
+lacks "the placeholder stops the run before the compose project starts" "$tmp/out" "starting compose project"
+checks=$(( checks + 1 ))
+[ ! -e "$runs/placeholder" ] || fail "the placeholder leaves no run directory"
+nothing_pushed placeholder
 
 {
   printf '# Oversized\n\nOVERSIZED\n\n```sh\n'
@@ -455,6 +469,7 @@ printf '# Use the settings\n\nIssue: ABC-123\n\nTWO-MODELS\n' >"$tmp/plans/setti
 equals "a run with a model and an effort exits 0" "$?" 0
 has_line "JIG_MODEL overrides the profile's model, and the profile's effort is passed" "$runs/settings/claude.log" \
   '{"type":"system","subtype":"fake","msg":"args: '"$harness_args"' --model claude-fake-2 --effort high '"$stream_args"'"}'
+has_line "the terminal names another tracker's reference as text before the agent starts" "$tmp/out" "jig: issue: ABC-123 (as text)"
 has_line "the terminal names the requested model and effort with their sources before the agent starts" "$tmp/out" \
   "jig: agent model: claude-fake-2 (from JIG_MODEL), effort: high (from the profile)"
 models_text="model: claude-fake-1 (claude-fake-2 from JIG_MODEL), also claude-fake-mini, effort: high (from the profile)"

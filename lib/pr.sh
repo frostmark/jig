@@ -42,17 +42,41 @@ jig_pr_excerpt() {
   printf '%s\n%s' "$(jig_cut $(( max - ${#note} - 1 )) "$text")" "$note"
 }
 
-jig_pr_issue() {
-  local ref re='^#[1-9][0-9]*$' LC_ALL=C
-  ref="$(LC_ALL=C awk 'title && !/^[[:space:]]*$/ { if (sub(/^Issue:[[:blank:]]*/, "")) print; exit }
-    /^# / { title = 1 }' "$1")" || return 1
+jig_plan_issue() {
+  local out ref re='^#[1-9][0-9]*$' LC_ALL=C
+  out="$(LC_ALL=C awk '{ sub(/\r$/, "") }
+    !seen && title && !/^[[:space:]]*$/ { seen = 1; if (sub(/^Issue:[[:blank:]]*/, "")) { ref = $0; next } }
+    /^# / { title = 1 }
+    /^#+ / { next }
+    { l = tolower($0) }
+    l ~ /^[[:blank:]]*[*_]*issue/ || l ~ /(^|[^a-z])issue[*_]*:/ { strays = strays NR ":" $0 "\n" }
+    END { print ref; printf "%s", strays }' "$1")" || return 1
+  ref="${out%%$'\n'*}"
+  issue_strays=""
+  [ "$out" = "$ref" ] || issue_strays="${out#*$'\n'}"
   ref="${ref%"${ref##*[![:space:]]}"}"
+  issue_line=""
+  issue_text=none
   [ -n "$ref" ] || return 0
+  case "$ref" in
+    *[\<\>]*) return 2 ;;
+  esac
   if [[ $ref =~ $re ]]; then
-    printf 'Fixes %s' "$ref"
+    issue_line="Fixes $ref"
+    issue_text="$issue_line"
   else
-    printf 'Issue: %s' "$(jig_pr_line "$ref")"
+    issue_line="Issue: $(jig_pr_line "$ref")"
+    issue_text="$(jig_pr_line "$ref") (as text)"
   fi
+}
+
+jig_issue_warnings() {
+  local line
+  [ -n "$issue_strays" ] || return 0
+  while IFS= read -r line; do
+    printf "the plan's line %s is not read as its Issue line: %s (jig reads \"Issue: <ref>\" only as the first line under the title)\n" \
+      "${line%%:*}" "$(jig_pr_line "${line#*:}")"
+  done <<<"$issue_strays"
 }
 
 jig_pr_render() {

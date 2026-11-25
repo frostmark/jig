@@ -345,7 +345,13 @@ first line after the plan's first `# ` heading that is not blank, so it must com
 With an issue of the repository, `#123`, the PR description starts with `Fixes #123`, and merging the PR
 closes the issue (GitHub reads closing keywords only in PRs into the repository's default branch). Any
 other reference, such as a tracker ID, opens the description as is: `Issue: ABC-123` (printable ASCII,
-at most 200 bytes). A plan without the line, or with an empty one, gets neither.
+at most 200 bytes). A plan without the line, or with an empty one, gets neither. jig reads the line
+from the plan's copy at launch and prints what it found: `jig: issue: Fixes #123`,
+`jig: issue: ABC-123 (as text)` or `jig: issue: none`. A reference with `<` or `>`, such as the
+template's `<ref>` left in, stops jig with code 2 before anything runs, and the run directory is
+removed. Any other line that looks like an Issue line gets a warning naming it, because jig does not
+read it: a line that starts with `issue` in any case, also indented or in bold (`**Issue:** #5`), or
+one with `Issue:` after other text. Headings are not checked.
 
 The plan is never committed: the branch holds only the agent's commits, and the reasoning behind a change
 belongs in the issue and the PR description. The PR description ends with the plan text in a collapsed
@@ -384,7 +390,8 @@ value counts as unset, and an invalid one stops jig with code 2 before anything 
 
 What `jig run` does: precondition checks → the overlay lookup → the base and the profile (`.jig/` of
 `origin/<base>` with the overlay's profile files over it) → the profile and harness sources printed →
-the profile, the plan's copy, the system prompt and the compose overrides written to the run directory →
+the profile and the plan's copy written to the run directory → the plan's Issue line read and printed →
+the system prompt and the compose overrides written to the run directory →
 a clone of that commit in `$JIG_HOME/runs/<owner>/<repo>/<slug>/repo` → compose project
 `jig-run_<owner>_<repo>_<slug>` (no ports on the host; owner and repo lowercased, characters other than
 latin letters, digits and `-` turned into `-`) → the branch `jig/<slug>` and `setup` in the container →
@@ -545,14 +552,16 @@ rules, the system prompt, the compose override with the plan mount, the agent's 
 `--model` and `--effort` from the profile and the environment, the agent line's model and effort and what it keeps from the log (values out of shape, more than five other models), the name warnings, the harness report on
 the terminal and in the PR, and the PR description (`lib/pr.sh`): the plan block, its fence and where it
 is cut, the caps on the agent's texts and lists, the last guard on the description's size, and the
-issue line read from the plan.
+issue line read from the plan with its launch text, the refused placeholder and the warnings for Issue
+lines that are not read.
 Both need bash and git 2.28 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
 
-`test/run_e2e.sh` runs `jig smoke` and five `jig run`s end to end against a local bare `origin`, with a
+`test/run_e2e.sh` runs `jig smoke` and six `jig run`s end to end against a local bare `origin`, with a
 fake `claude` mounted over `/usr/local/bin/claude` (it records its arguments and names a model in its
 log) and a fake `gh` on `PATH`, so it needs no credential and no network: a clean run with `Fixes #12`
-and no model or effort, a run without commits, a run with oversized agent output (a log with control characters in its outcome and 1,000 models among it) and a plan cut inside
+and no model or effort, a run without commits and with a misplaced Issue line, a plan with the
+template's `<ref>` left in its Issue line (it stops before anything runs), a run with oversized agent output (a log with control characters in its outcome and 1,000 models among it) and a plan cut inside
 its own code fence, a plan whose only heading carries the credential, and a run with a model and an
 effort from an overlay config and `JIG_MODEL` and another tracker's issue. It also reads made-up
 `claude.log`s with `lib/agent-log.js` in the image, values out of shape and past their limits among them. It runs only when
