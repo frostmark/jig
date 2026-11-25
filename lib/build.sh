@@ -166,7 +166,7 @@ jig_check_compose() {
     for name in ${profile_build_secrets[@]+"${profile_build_secrets[@]}"}; do
       export "$name=$(jig_build_secret_marker "$name")"
     done
-    jig_compose config --format json
+    { jig_compose config --format json 2>&1 >&3 3>&- | jig_redact_stream >&2; } 3>&1
   )" || {
     jig_compose_problem="docker compose config failed on the profile's compose files and jig's"
     return 1

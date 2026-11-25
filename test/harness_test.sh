@@ -1189,6 +1189,7 @@ docker() {
   printf '%s|E2E_SECRET=%s\n' "$*" "${E2E_SECRET-unset}" >>"$tmp/docker.calls"
   case "$1 ${*: -3}" in
     "compose config --format json")
+      [ -z "${config_err-}" ] || printf '%s\n' "$config_err" >&2
       [ "$fixture" != fail ] || return 1
       config_text="$(cat "$tmp/compose/$fixture.json")"
       printf '%s\n' "${config_text//@E2E_SECRET@/${E2E_SECRET-}}" ;;
@@ -1249,6 +1250,12 @@ jig-acme-inc-2169544754_my-repo-3261712207-397289535
 jig-acme-inc-2169544754_my-repo-3261712207-db-1"
 equals "image names are valid Docker repository names" \
   "$( (gh_repo=x/.-_ image_names A -a- a..b 9; gh_repo=x/.github image_names a) | LC_ALL=C grep -c -v -E '^[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*$')" 0
+config_err='failed to read /srv/.env: line 2: unexpected character "real-E2E_KEY-value", not real-E2E_KEY-valu' fixture=fail
+equals "docker compose config's messages, an error quoting an env_file line for example, reach the terminal with the secret values redacted" \
+  "$(jig_secret_names=() jig_secret_values=() && jig_add_secret E2E_KEY real-E2E_KEY-value && inspect)" \
+  "failed to read /srv/.env: line 2: unexpected character \"[REDACTED]\", not real-E2E_KEY-valu
+refused|docker compose config failed on the profile's compose files and jig's"
+unset config_err
 fixture=no_build
 equals "without a service that builds there is no label file" "$(inspect; [ -e "$tmp/compose/compose.build.yml" ] && echo ' file')" \
   "ok||-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml"

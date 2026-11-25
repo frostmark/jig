@@ -330,7 +330,8 @@ Then `jig run` and `jig smoke`:
 - look for each value as for the model credential: the branch is not kept or pushed when it carries one
   (see [Usage](#usage)), and the run directory's logs get `[REDACTED]` in its place. The build's output is
   redacted before it reaches the terminal and `build.log`, so a `RUN` step that prints a secret shows
-  `[REDACTED]`. jig matches each value as a fixed string of any characters, and a value with `\` or `"`
+  `[REDACTED]`; so are the messages of `docker compose config`, an error that quotes an `env_file` line
+  for example. jig matches each value as a fixed string of any characters, and a value with `\` or `"`
   also in the form that JSON gives it in `claude.log`; where one value holds another, the longer one is
   replaced first, on the terminal and in every log. A value never goes on the command line of a
   command jig runs, where other users of the host could see it in `ps`: `grep`, `awk` and `sed` read the
@@ -772,7 +773,7 @@ It also checks the host safety of `lib/build.sh` and `lib/common.sh`: the scan a
 credential and the build secrets (values with `:`, `/`, `&`, regex and glob characters, near misses,
 overlapping values, the JSON form, a stream redacted line by line as it comes), the build secrets read from
 the environment and removed from it, the builder of the Docker context or `BUILDX_BUILDER`, the disk check against a stand-in
-`df` (names with spaces) and `docker` (Docker Desktop, a remote context), reading `docker compose config` (a build secret's name in a service's environment, a
+`df` (names with spaces) and `docker` (Docker Desktop, a remote context), reading `docker compose config` (its messages redacted, a build secret's name in a service's environment, a
 runtime secret or config that takes it, its value resolved anywhere, the value itself as it is or
 JSON-escaped, the services that build, jig's label
 file, the image names jig gives, which are valid Docker names whatever the owner, repository and
