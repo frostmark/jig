@@ -403,11 +403,14 @@ the agent ran on and the effort:
 - Agent: exit 0, success, turns: 15, estimated cost $1.23, model: claude-opus-5-5 (opus from the profile), effort: high (from JIG_EFFORT)
 ```
 
-The model is the one `claude.log` names when the session starts. In parentheses: `default` when jig
-passed no `--model`, otherwise the value jig passed and where it came from (`the profile` or
-`JIG_MODEL`), only the source when the log names the same model. Other models the run used, by
-subagents for example, follow as `also <model>`; a log without a model gives `unknown`. The effort is
-not in the log: it is the value jig passed with its source, or `default`. The terminal shows the
+The model is the one `claude.log` names when the session starts, or `unknown` when it names none. In
+parentheses: `default` when jig passed no `--model`, otherwise the value jig passed and where it came
+from (`the profile` or `JIG_MODEL`), only the source when the log names the same model. Other models the
+run used, by subagents for example, follow as `also <model>`: five at most, then `and N more`. The
+agent can write to its own log, so jig takes from it only values of its own shape and leaves out the
+rest: an outcome of lowercase letters and `_` (40 at most), whole turns, a cost below a million dollars,
+and model names that follow the rule of the `model` key. The effort is not in the log: it is the value
+jig passed with its source, or `default`. The terminal shows the
 requested model and effort before the agent starts (`jig: agent model: ..., effort: ...`) and the same
 text as the PR's agent line after it (`jig: agent: ...`), in a run without commits too.
 
@@ -539,7 +542,7 @@ profile report with the overlay commit, and starting `bin/jig` through a symlink
 `test/harness_test.sh` checks the overlay lookup and its validation (a relative `JIG_PROFILES`, an
 invalid `JIG_MODEL` or `JIG_EFFORT` stops `jig run` before the credential check), the rendered engine
 rules, the system prompt, the compose override with the plan mount, the agent's arguments and prompt,
-`--model` and `--effort` from the profile and the environment, the agent line's model and effort, the name warnings, the harness report on
+`--model` and `--effort` from the profile and the environment, the agent line's model and effort and what it keeps from the log (values out of shape, more than five other models), the name warnings, the harness report on
 the terminal and in the PR, and the PR description (`lib/pr.sh`): the plan block, its fence and where it
 is cut, the caps on the agent's texts and lists, the last guard on the description's size, and the
 issue line read from the plan.
@@ -549,10 +552,10 @@ Both need bash and git 2.28 or newer, work offline and leave nothing behind: `ba
 `test/run_e2e.sh` runs `jig smoke` and five `jig run`s end to end against a local bare `origin`, with a
 fake `claude` mounted over `/usr/local/bin/claude` (it records its arguments and names a model in its
 log) and a fake `gh` on `PATH`, so it needs no credential and no network: a clean run with `Fixes #12`
-and no model or effort, a run without commits, a run with oversized agent output and a plan cut inside
+and no model or effort, a run without commits, a run with oversized agent output (a log with control characters in its outcome and 1,000 models among it) and a plan cut inside
 its own code fence, a plan whose only heading carries the credential, and a run with a model and an
 effort from an overlay config and `JIG_MODEL` and another tracker's issue. It also reads made-up
-`claude.log`s with `lib/agent-log.js` in the image. It runs only when
+`claude.log`s with `lib/agent-log.js` in the image, values out of shape and past their limits among them. It runs only when
 `JIG_E2E_IMAGE` names a local image with bash, git, node and `timeout` (it is never pulled) and Docker is
 running, and skips otherwise: `JIG_E2E_IMAGE=<image> bash test/run_e2e.sh`. It needs what `jig run`
 needs on the host (git 2.49 or newer) and removes its compose projects and files.

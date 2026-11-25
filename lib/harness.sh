@@ -159,11 +159,22 @@ jig_agent_settings() {
 }
 
 jig_agent_report() {
-  local meta="$1" models="$2" main others text
-  main="${models%% *}"
-  others=""
-  [ "$models" = "$main" ] || others="${models#* }"
-  [ -n "$main" ] || main=unknown
+  local meta="" main="" name text also="" more=0 LC_ALL=C
+  local meta_re='^((error \([a-z_]{1,40}\)|[a-z_]{1,40}), )?(turns: [0-9]{1,6}, )?(estimated cost \$[0-9]{1,6}\.[0-9]{2}, )?$'
+  local count_re='^(0|[1-9][0-9]{0,5})$'
+  local -a others=()
+  { IFS= read -r meta && IFS= read -r main && read -r -a others; } <<<"$1" || true
+  [[ "$meta, " =~ $meta_re ]] || meta=""
+  jig_valid_model "$main" || main=unknown
+  if [ "${#others[@]}" -gt 0 ] && [[ ${others[0]} =~ $count_re ]]; then
+    more="${others[0]}"
+    for name in "${others[@]:1:5}"; do
+      jig_valid_model "$name" || continue
+      also="$also and $name"
+      more=$(( more - 1 ))
+    done
+  fi
+  [ "$more" -le 0 ] || also="$also and $more more"
   if [ -z "$jig_model" ]; then
     text="model: $main (default)"
   elif [ "$jig_model" = "$main" ]; then
@@ -171,7 +182,7 @@ jig_agent_report() {
   else
     text="model: $main ($jig_model from $jig_model_source)"
   fi
-  [ -z "$others" ] || text="$text, also ${others// / and }"
+  [ -z "$also" ] || text="$text, also ${also# and }"
   text="$text, effort: $(jig_setting "$jig_effort" "$jig_effort_source")"
   [ -z "$meta" ] || text="$meta, $text"
   printf '%s' "$text"

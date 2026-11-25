@@ -230,29 +230,81 @@ equals "only an effort from the profile" "$(agent_options "" medium unset unset)
 equals "empty JIG_MODEL and JIG_EFFORT leave the profile's values" "$(agent_options opus high "" "")" \
   "--model opus --effort high|model: opus (from the profile), effort: high (from the profile)"
 
+fill() {
+  printf "%$1s" '' | tr ' ' "$2"
+}
+
 report() {
   (
     profile_model="$1" profile_effort="$2"
     unset JIG_MODEL JIG_EFFORT
     [ "$3" = unset ] || export JIG_MODEL="$3"
-    jig_agent_options && jig_agent_report "$4" "$5"
+    jig_agent_options && jig_agent_report "$4"
   ) 2>&1
 }
 meta='success, turns: 3, estimated cost $0.01'
 equals "the model from the log next to turns and cost, with Claude Code's defaults" \
-  "$(report "" "" unset "$meta" claude-sonnet-5-5)" \
-  "$meta, model: claude-sonnet-5-5 (default), effort: default"
-equals "an alias from the profile and the model the log names" "$(report opus high unset "$meta" claude-opus-5-5)" \
-  "$meta, model: claude-opus-5-5 (opus from the profile), effort: high (from the profile)"
-equals "a model name that the log confirms is named once" "$(report "" "" claude-opus-5-5 "$meta" claude-opus-5-5)" \
-  "$meta, model: claude-opus-5-5 (from JIG_MODEL), effort: default"
-equals "the other models in the log follow the main one" \
-  "$(report "" "" unset "$meta" "claude-opus-5-5 claude-haiku-5 claude-fake-2")" \
-  "$meta, model: claude-opus-5-5 (default), also claude-haiku-5 and claude-fake-2, effort: default"
-equals "a log without a result or a model" "$(report opus "" unset "" "")" \
+  "$(report "" "" unset "$meta
+claude-sonnet-5-5
+0")" "$meta, model: claude-sonnet-5-5 (default), effort: default"
+equals "an alias from the profile and the model the log names" "$(report opus high unset "$meta
+claude-opus-5-5
+0")" "$meta, model: claude-opus-5-5 (opus from the profile), effort: high (from the profile)"
+equals "a model name that the log confirms is named once" "$(report "" "" claude-opus-5-5 "$meta
+claude-opus-5-5
+0")" "$meta, model: claude-opus-5-5 (from JIG_MODEL), effort: default"
+equals "the other models in the log follow the main one" "$(report "" "" unset "$meta
+claude-opus-5-5
+2 claude-haiku-5 claude-fake-2")" "$meta, model: claude-opus-5-5 (default), also claude-haiku-5 and claude-fake-2, effort: default"
+equals "a log without a result or a model" "$(report opus "" unset "")" \
   "model: unknown (opus from the profile), effort: default"
-equals "a log with a result and no model" "$(report "" low unset "$meta" "")" \
-  "$meta, model: unknown (default), effort: low (from the profile)"
+equals "a log with a result and no model" "$(report "" low unset "$meta
+
+0")" "$meta, model: unknown (default), effort: low (from the profile)"
+equals "a log without a main model names the other models" "$(report "" "" unset "$meta
+
+1 claude-fake-2")" "$meta, model: unknown (default), also claude-fake-2, effort: default"
+for kept in 'error (error_max_turns), turns: 9' 'error, turns: 3' 'turns: 3, estimated cost $0.01' \
+  'estimated cost $123456.78' success "$(fill 40 a), turns: 999999"; do
+  equals "an outcome, turns and cost in jig's shape are kept: $kept" "$(report "" "" unset "$kept
+claude-fake-1
+0")" "$kept, model: claude-fake-1 (default), effort: default"
+done
+for dropped in "success"$'\e]0;title\a' $'\e[2Jsuccess, turns: 3' '**success**, turns: 3' 'success, turns: 3 [x](y)' \
+  'Success, turns: 3' "$(fill 41 a), turns: 3" 'success, turns: 1234567' 'success, turns: -1' \
+  'success, estimated cost $1234567.00' 'success, estimated cost $0.1' 'turns: 3, success' 'success, ' ', turns: 3'; do
+  equals "an outcome, turns and cost in another shape are dropped: $(printable "$dropped")" "$(report "" "" unset "$dropped
+claude-fake-1
+0")" "model: claude-fake-1 (default), effort: default"
+done
+for bad in $'claude\e[2J' 'has space' "a$(fill 100 b)" '-dash' 'x`y'; do
+  equals "a main model outside the model rule is unknown: $(printable "$bad")" "$(report "" "" unset "$meta
+$bad
+0")" "$meta, model: unknown (default), effort: default"
+done
+for count in x 01 -1 1234567 ''; do
+  equals "other models without a count of them are dropped: $count" "$(report "" "" unset "$meta
+claude-fake-1
+$count claude-haiku-5")" "$meta, model: claude-fake-1 (default), effort: default"
+done
+equals "other models outside the model rule are counted, not named" "$(report "" "" unset "$meta
+claude-fake-1
+4 claude-a x\`y claude-b $'\e[2J'")" "$meta, model: claude-fake-1 (default), also claude-a and claude-b and 2 more, effort: default"
+equals "other models past a fifth are counted, not named" "$(report "" "" unset "$meta
+claude-fake-1
+1000 $(for n in $(seq 1 1000); do printf 'claude-m%s ' "$n"; done)")" \
+  "$meta, model: claude-fake-1 (default), also claude-m1 and claude-m2 and claude-m3 and claude-m4 and claude-m5 and 995 more, effort: default"
+equals "only other models, all past the names given, are counted" "$(report "" "" unset "$meta
+claude-fake-1
+7")" "$meta, model: claude-fake-1 (default), also 7 more, effort: default"
+equals "lines after the other models are not read" "$(report "" "" unset "$meta
+claude-fake-1
+0
+1 claude-evil")" "$meta, model: claude-fake-1 (default), effort: default"
+mkdir "$tmp/glob" && : >"$tmp/glob/sonnet1"
+equals "a model name is not a file pattern" "$(cd "$tmp/glob" && report "" "" unset "$meta
+claude-fake-1
+1 sonnet[1m]")" "$meta, model: claude-fake-1 (default), also sonnet[1m], effort: default"
 
 repo_root="$tmp/repo"
 git init -q -b main "$repo_root"
@@ -349,9 +401,6 @@ equals "the fence is longer than the plan's longest backtick run, wherever it is
   "$(jig_pr_body "$tmp/run/fenced.md" copy.md top end | sed -n '5p;11p')" '`````markdown
 `````'
 
-fill() {
-  printf "%$1s" '' | tr ' ' "$2"
-}
 bytes() {
   LC_ALL=C wc -c | tr -d ' '
 }

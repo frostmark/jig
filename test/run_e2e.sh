@@ -78,9 +78,12 @@ say() {
   node -e 'process.stdout.write(JSON.stringify({ type: "system", subtype: "fake", msg: process.argv[1] }) + "\n")' "$1"
 }
 result() {
-  node -e 'const usage = {}; for (const m of process.argv[2].split(" ")) usage[m] = { costUSD: 0.005 };
-    process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 3,
-    total_cost_usd: 0.01, modelUsage: usage, result: process.argv[1] }) + "\n")' "$1" "$models"
+  node -e 'const [text, models, hostile] = process.argv.slice(1); const usage = {};
+    for (const m of models.split(" ")) usage[m] = { costUSD: 0.005 };
+    if (hostile) for (let n = 1; n <= 1000; n++) usage[`claude-fake-${String(n).padStart(4, "0")}-${"x".repeat(83)}`] = {};
+    const subtype = hostile ? "success\n\u001b]0;title\u0007\u001b[2J## Injected\n- **bold**" : "success";
+    process.stdout.write(JSON.stringify({ type: "result", subtype, is_error: false, num_turns: 3,
+    total_cost_usd: 0.01, modelUsage: usage, result: text }) + "\n")' "$1" "$models" "${2:-}"
 }
 check() {
   say "check failed: $1"
@@ -116,7 +119,7 @@ elif grep -q -x OVERSIZED /jig/plan.md; then
   for n in $(seq 10 69); do
     : >"untracked-$n-$long"
   done
-  result "$(node -e 'for (let n = 1; n <= 1500; n++) console.log(`Шаг ${n}: ответ проверен → готово.`)')"
+  result "$(node -e 'for (let n = 1; n <= 1500; n++) console.log(`Шаг ${n}: ответ проверен → готово.`)')" hostile
 else
   echo ok >health.txt
   git add health.txt
@@ -247,24 +250,56 @@ long100="$(printf '%100s' '' | tr ' ' c)"
 printf '%s\n' '{"type":"system","subtype":"init","model":"a'"$long99"'"}' \
   '{"type":"result","subtype":"success","num_turns":1,"modelUsage":{"a'"$long100"'":{},"[1m]":{},"sonnet[1m]":{}}}' \
   >"$tmp/logs/5-names"
-equals "the log gives the outcome, turns and cost, then the first init model and the other models it used" \
+printf '%s\n' '{"type":"system","subtype":"init","model":"claude\u001b[2J"}' \
+  '{"type":"result","subtype":"success\n\u001b]0;title\u0007**bold**","is_error":false,"num_turns":"3","total_cost_usd":-0.5,"modelUsage":{"claude-fake-1":{}}}' \
+  >"$tmp/logs/6-bad-values"
+usage="$(for n in $(seq 1 1000); do printf '"claude-fake-m%s":{},' "$n"; done)"
+printf '%s\n' '{"type":"system","subtype":"init","model":"claude-fake-1"}' \
+  '{"type":"result","subtype":"error_during_execution\n# Injected","is_error":true,"num_turns":1000000,"total_cost_usd":1e21,"modelUsage":{"claude-fake-1":{},'"${usage%,}"'}}' \
+  >"$tmp/logs/7-error-and-many-models"
+printf '%s\n' '{"type":"result","subtype":"'"$(printf '%40s' '' | tr ' ' a)"'","num_turns":999999,"total_cost_usd":999999.99}' \
+  >"$tmp/logs/8-limits"
+printf '%s\n' '{"type":"result","subtype":"'"$(printf '%41s' '' | tr ' ' a)"'","num_turns":-1,"total_cost_usd":1000000}' \
+  >"$tmp/logs/9-past-limits"
+equals "the log gives the outcome, turns and cost that fit jig's shape, the first init model and up to five other models with their count" \
   "$(docker run --rm --network none -v "$root/lib/agent-log.js:/jig/agent-log.js:ro" -v "$tmp/logs:/logs:ro" \
     --entrypoint sh "$image" -c 'for f in /logs/*; do echo "== ${f#/logs/}"; node -e "$(cat /jig/agent-log.js)" meta <"$f"; done' 2>&1)" \
   "== 1-init-and-result
 success, turns: 4, estimated cost \$0.12
-claude-fake-1 claude-fake-mini
+claude-fake-1
+1 claude-fake-mini
 == 2-no-result
 
 claude-fake-1
+0
 == 3-no-init
 error (error_max_turns), turns: 9
-claude-fake-2
+
+1 claude-fake-2
 == 4-empty
 
 
+0
 == 5-names
 success, turns: 1
-a$long99 sonnet[1m]"
+a$long99
+1 sonnet[1m]
+== 6-bad-values
+
+
+1 claude-fake-1
+== 7-error-and-many-models
+error
+claude-fake-1
+1000 claude-fake-m1 claude-fake-m2 claude-fake-m3 claude-fake-m4 claude-fake-m5
+== 8-limits
+$(printf '%40s' '' | tr ' ' a), turns: 999999, estimated cost \$999999.99
+
+0
+== 9-past-limits
+
+
+0"
 
 jig smoke
 equals "smoke exits 0" "$?" 0
@@ -356,6 +391,15 @@ equals "a run with JIG_BLOCKED.md and uncommitted changes exits 1" "$?" 1
 has_line "the PR is a draft" "$tmp/gh/oversized.args" --draft
 body="$tmp/gh/oversized.body"
 equals "a plan without an Issue line: the PR body starts with verify" "$(sed -n 1p "$body")" "- .jig/verify: green"
+many="$(for n in 1 2 3 4 5; do printf 'claude-fake-000%s-%s and ' "$n" "$(printf '%83s' '' | tr ' ' x)"; done)995 more"
+has_line "a log with control characters in its outcome and 1,000 models gives a short printable agent line" "$tmp/out" \
+  "jig: agent: turns: 3, estimated cost \$0.01, model: claude-fake-1 (default), also $many, effort: default"
+has_line "the PR's agent line is as short" "$body" \
+  "- Agent: exit 0, turns: 3, estimated cost \$0.01, model: claude-fake-1 (default), also $many, effort: default"
+has_line "the PR still lists what needs attention" "$body" "## Needs attention"
+for f in "$tmp/out" "$tmp/err" "$body"; do
+  lacks "no escape character from the log reaches ${f##*/}" "$f" $'\e'
+done
 checks=$(( checks + 1 ))
 size="$(bytes <"$body")"
 [ "$size" -le 65536 ] || fail "oversized agent output keeps the PR body within 65,536 bytes: $size bytes"

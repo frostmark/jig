@@ -250,10 +250,7 @@ agent_log="$(jig_compose exec -T app node -e "$extract_js" meta <"$run/claude.lo
   extract_status=$?
 [ "$extract_status" != 130 ] || exit 130
 [ "$extract_status" = 0 ] || agent_log=""
-agent_meta="${agent_log%%$'\n'*}"
-agent_models=""
-[ "$agent_log" = "$agent_meta" ] || agent_models="${agent_log#*$'\n'}"
-agent_report="$(jig_agent_report "$agent_meta" "$agent_models")"
+agent_report="$(jig_agent_report "$agent_log")"
 echo "$jig_name: agent: $agent_report"
 
 teardown || die "docker compose down failed: remove project $jig_project by hand"
