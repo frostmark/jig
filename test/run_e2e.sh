@@ -973,6 +973,21 @@ equals "a run builds the image once" "$(cat "$tmp/out" "$tmp/err" | grep -c "nam
 checks=$(( checks + 1 ))
 [ -z "$(image_id "$leak_image")" ] || fail "each rebuild removes the image it left dangling"
 equals "only the current image and another repository's are left" "$(test_images | wc -l | tr -d ' ')" 3
+
+unnamed=jig-acme_shop-app:latest
+sed '/^    image: /d' "$tmp/compose-build.yml" >"$overlay/compose.yml"
+(export E2E_RUN=$build_id-unnamed-1 && jig smoke)
+equals "a smoke of a profile whose app builds without image: exits 0" "$?" 0
+equals "jig names the image of a service that builds without image: after the repository and the service" \
+  "$(docker image inspect --format '{{index .Config.Labels "jig.repo"}}' "$unnamed" 2>&1)" acme/shop
+unnamed_old="$(image_id "$unnamed")"
+(export E2E_RUN=$build_id-unnamed-2 && jig smoke)
+equals "a second smoke of that profile exits 0" "$?" 0
+checks=$(( checks + 1 ))
+[ -n "$(image_id "$unnamed")" ] && [ "$(image_id "$unnamed")" != "$unnamed_old" ] || fail "the second smoke builds a new image under the same name"
+checks=$(( checks + 1 ))
+[ -z "$(image_id "$unnamed_old")" ] || fail "the image of a profile without image: that the rebuild left dangling is removed"
+cp "$tmp/compose-build.yml" "$overlay/compose.yml"
 unset E2E_BUILD_SECRET
 
 equals "the commands jig ran on the host went through the recording stand-ins on PATH" \

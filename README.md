@@ -268,13 +268,15 @@ Other services (a database, a cache) are the profile's business. No ports need t
 compose file runs on the host's Docker, so whoever can merge into `base` decides what the containers get
 (mounts, privileges); review `.jig/` changes like CI changes.
 
-Name the image that `app` builds (`image: acme-shop-jig` above). jig labels every image it builds with
+The image that `app` builds may have a name (`image: acme-shop-jig` above) or not. jig labels every image it builds with
 `jig.repo=<owner>/<repo>`, through a compose file it adds (`compose.build.yml`, with `build.labels` for each
 service that has `build`), and after each build it removes that repository's dangling images
-(`docker image prune -f --filter label=jig.repo=<owner>/<repo>`). With a fixed name, a rebuild moves the
-name to the new image and the old one becomes dangling. Without `image:`, compose names the image after the
-compose project, which differs per run (`jig-run_<owner>_<repo>_<slug>-app`), so old images keep their
-names and are never removed. jig never touches other images or the build cache, and Docker skips an image
+(`docker image prune -f --filter label=jig.repo=<owner>/<repo>`). A rebuild moves the image's name to the
+new image and the old one becomes dangling. A service that builds without `image:` gets a name from jig
+in the same file, one per repository and service: `jig-<owner>_<repo>-<service>` (an owner, repository or
+service name with characters other than lowercase latin letters, digits and `-` is lowercased, those
+characters turned into `-`, and a checksum of the original name added), so its old images are removed
+too; compose's own name would differ per run (`jig-run_<owner>_<repo>_<slug>-app`). jig never touches other images or the build cache, and Docker skips an image
 that a container still uses.
 
 ### Build secrets
@@ -689,7 +691,8 @@ The run directory `$JIG_HOME/runs/<owner>/<repo>/<slug>/` stays after the run:
 - `compose.profile.yml`: the compose file jig added for the profile mount and `JIG_BASE`;
 - `system-prompt.md`: the engine rules and the overlay rules, as the agent got them;
 - `compose.harness.yml`: the compose file jig added for the harness and plan mounts;
-- `compose.build.yml`: the compose file jig added for the `jig.repo` label of the services that build
+- `compose.build.yml`: the compose file jig added for the `jig.repo` label of the services that build and
+  the image name of those without `image:`
   (none when no service builds).
 
 The clone `repo/` is gone after the run: it holds the agent's `.git`, whose hooks and config any
@@ -762,13 +765,14 @@ the environment and removed from it, the builder of the Docker context or `BUILD
 `df` and `docker`, reading `docker compose config` (a build secret's name in a service's environment, a
 runtime secret or config that takes it, its value resolved anywhere, the value itself as it is or
 JSON-escaped, the services that build, jig's label
-file) and the build with its log and the prune against a stand-in `docker` that records which calls get
+file, the image names jig gives, which are valid Docker names whatever the owner, repository and
+service are called) and the build with its log and the prune against a stand-in `docker` that records which calls get
 the build secret; stand-ins for `grep`, `awk`, `sed` and the other commands on that path record their
 command lines, and none carries a secret value.
 Both need bash and git 2.29 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
 
-`test/run_e2e.sh` runs nine `jig smoke`s and twenty `jig run`s end to end against a local bare repository that
+`test/run_e2e.sh` runs eleven `jig smoke`s and twenty `jig run`s end to end against a local bare repository that
 `origin`, `git@github.com:acme/shop.git`, reaches through a fake `ssh` (`GIT_SSH_COMMAND`), with a
 fake `claude` mounted over `/usr/local/bin/claude` (it records its arguments and names a model in its
 log) and a fake `gh` on `PATH` that records its calls, so it needs no credential and no network. With
@@ -796,8 +800,9 @@ smoke removes its clone and a red one keeps it; a plan that carries the secret i
 value in its environment or under `/run/secrets`, and of the compose commands only the build gets the
 value (a `docker` on `PATH` records each call and whether the variable is set); and stand-ins on `PATH`
 for `docker`, `git`, `grep`, `sed`, `awk` and the other commands jig runs on the host record every
-command line of every run and smoke, none of which carries the credential or the build secret; each rebuild removes the image it left dangling while another repository's dangling
-image stays. It also reads made-up
+command line of every run and smoke, none of which carries the credential or the build secret; each
+rebuild removes the image it left dangling while another repository's dangling image stays, and so does a
+rebuild of a profile without `image:`, whose image jig names `jig-acme_shop-app`. It also reads made-up
 `claude.log`s with `lib/agent-log.js` in the image, values out of shape and past their limits among them. It runs only when
 `JIG_E2E_IMAGE` names a local image with bash, git, node and `timeout` (it is never pulled) and Docker is
 running, and skips otherwise. The images it builds are small layers over that image or `scratch`, labelled

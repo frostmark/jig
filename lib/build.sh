@@ -81,6 +81,17 @@ jig_config_has_value() {
   printf '%s\n' "$1" | LC_ALL=C grep -a -F -f <(jig_config_forms "$2") >/dev/null
 }
 
+jig_image_part() {
+  local part LC_ALL=C
+  part="$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed -e 's/[^a-z0-9][^a-z0-9]*/-/g' -e 's/^-//' -e 's/-$//')"
+  [ "$part" = "$1" ] || part="${part:+$part-}$(printf '%s' "$1" | cksum | sed 's/[^0-9].*//')"
+  printf '%s' "$part"
+}
+
+jig_image_name() {
+  printf 'jig-%s_%s-%s' "$(jig_image_part "${gh_repo%%/*}")" "$(jig_image_part "${gh_repo#*/}")" "$(jig_image_part "$1")"
+}
+
 jig_is_build_secret() {
   local name
   for name in ${profile_build_secrets[@]+"${profile_build_secrets[@]}"}; do
@@ -100,6 +111,7 @@ block != "services" { next }
 /^    "[A-Za-z0-9._-]+": \{$/ { svc = $0; sub(/^    "/, "", svc); sub(/": \{$/, "", svc); env = 0; list = ""; print "service " svc; next }
 /^    [^ }]/ { bad = 1; next }
 /^      "build": \{/ { print "build " svc; next }
+/^      "image": / { print "image " svc; next }
 $0 == "      \"environment\": {" { env = 1; next }
 env && /^      }/ { env = 0; next }
 env && /^        "[^"\\]+": / { key = $0; sub(/^        "/, "", key); sub(/": .*$/, "", key); print "env " svc " " key; next }
@@ -115,11 +127,15 @@ END {
 }'
 
 jig_write_build_compose() {
-  local service
+  local named="$2" service
   {
     echo "services:"
     for service in "${jig_build_services[@]}"; do
       echo "  \"$service\":"
+      case "$named" in
+        *$'\n'"$service"$'\n'*) ;;
+        *) echo "    image: \"$(jig_image_name "$service")\"" ;;
+      esac
       echo "    build:"
       echo "      labels:"
       echo "        jig.repo: \"$gh_repo\""
@@ -128,7 +144,7 @@ jig_write_build_compose() {
 }
 
 jig_check_compose() {
-  local dir="$1" config facts kind service name source variable status i app=0
+  local dir="$1" config facts kind service name source variable status i app=0 named=$'\n'
   jig_build_services=()
   jig_compose_problem=""
   config="$(
@@ -148,6 +164,7 @@ jig_check_compose() {
     case "$kind" in
       service) [ "$service" != app ] || app=1 ;;
       build) jig_build_services+=("$service") ;;
+      image) named="$named$service"$'\n' ;;
       env)
         if jig_is_build_secret "$name"; then
           jig_compose_problem="the build secret $name is in the environment of the service $service (docker compose config): jig never passes a build secret into a container. Remove it from the service's environment and env_file; the build gets it from a top-level secret with environment: $name"
@@ -185,7 +202,7 @@ jig_check_compose() {
     esac
   done
   [ "${#jig_build_services[@]}" -gt 0 ] || return 0
-  jig_write_build_compose "$dir/compose.build.yml" || {
+  jig_write_build_compose "$dir/compose.build.yml" "$named" || {
     jig_compose_problem="could not write $dir/compose.build.yml"
     return 1
   }

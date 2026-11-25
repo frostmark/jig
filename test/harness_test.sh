@@ -1195,15 +1195,33 @@ equals "services that build are found and get jig's label file" "$(inspect)" \
   "ok|app worker|-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml -f $tmp/compose/compose.build.yml"
 equals "the config is read with markers in place of the build secrets' values" "$(cat "$tmp/docker.calls")" \
   "compose -p jig-run_acme_shop_x -f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml config --format json|E2E_SECRET=jig_build_secret_marker_E2E_SECRET_end"
-equals "the label file labels each service that builds with the repository" "$(cat "$tmp/compose/compose.build.yml")" 'services:
+equals "the label file labels each service that builds with the repository and names the image of one the profile leaves unnamed" \
+  "$(cat "$tmp/compose/compose.build.yml")" 'services:
   "app":
     build:
       labels:
         jig.repo: "acme/shop"
   "worker":
+    image: "jig-acme_shop-worker"
     build:
       labels:
         jig.repo: "acme/shop"'
+image_names() {
+  local service
+  for service in "$@"; do
+    jig_image_name "$service"
+    echo
+  done
+}
+equals "an image name keeps lowercase names and turns others into lowercase, digits and dashes with a checksum of the original" \
+  "$(gh_repo=Acme.Inc/My_Repo image_names app Web.API Web-API _ db-1)" \
+  "jig-acme-inc-2169544754_my-repo-3261712207-app
+jig-acme-inc-2169544754_my-repo-3261712207-web-api-1602141869
+jig-acme-inc-2169544754_my-repo-3261712207-web-api-2221479482
+jig-acme-inc-2169544754_my-repo-3261712207-397289535
+jig-acme-inc-2169544754_my-repo-3261712207-db-1"
+equals "image names are valid Docker repository names" \
+  "$(gh_repo=x/.-_ image_names A -a- a..b 9 | LC_ALL=C grep -c -v -E '^[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*$')" 0
 fixture=no_build
 equals "without a service that builds there is no label file" "$(inspect; [ -e "$tmp/compose/compose.build.yml" ] && echo ' file')" \
   "ok||-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml"
