@@ -673,6 +673,15 @@ grep -q -F "jig: the CLAUDE_CODE_OAUTH_TOKEN value was found in: report.md (bran
 nothing_pushed branch-leak
 no_gh "a branch run with the credential"
 fetch_head_kept branch-leak
+
+printf '# Carry the credential in the plan\n\nThe agent never needs %s.\n' "$token" >"$tmp/plans/branch-plan-leak.md"
+jig run "$tmp/plans/branch-plan-leak.md"
+equals "a branch run whose plan carries the credential exits 3" "$?" 3
+checks=$(( checks + 1 ))
+grep -q -F "jig: the CLAUDE_CODE_OAUTH_TOKEN value was found in: plan.md (branch.bundle was removed" "$tmp/err" ||
+  fail "branch delivery finds the credential in the plan's copy alone: $(cat "$tmp/err")"
+nothing_pushed branch-plan-leak
+no_gh "a branch run whose plan carries the credential"
 has_line "the report is redacted in the run directory" "$runs/branch-leak/report.md" "?? [REDACTED].txt"
 
 checks=$(( checks + 1 ))
