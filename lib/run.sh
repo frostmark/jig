@@ -308,7 +308,7 @@ while IFS= read -r -d '' f; do
   [ "$f" = JIG_BLOCKED.md ] || changes=1
   if jig_protected "$f"; then
     protected_count=$(( protected_count + 1 ))
-    [ "$protected_count" -gt "$list_max" ] || protected="$protected- \`$(printable "$f")\`
+    [ "$protected_count" -gt "$list_max" ] || protected="$protected- \`$(jig_pr_line "$f")\`
 "
   fi
 done <"$run/changed.z"
@@ -316,13 +316,19 @@ done <"$run/changed.z"
 "
 
 blocked=""
+blocked_file=""
 if g cat-file -e "$tip:JIG_BLOCKED.md" 2>/dev/null; then
   g show "$tip:JIG_BLOCKED.md" >"$run/blocked-branch.md" || die "could not read JIG_BLOCKED.md from $branch"
-  blocked="$(head -c 10000 "$run/blocked-branch.md")" || die "could not read $run/blocked-branch.md"
-  [ -n "$blocked" ] || blocked="(empty)"
+  blocked_file=blocked-branch.md
 elif grep -q 'JIG_BLOCKED\.md$' "$run/status.txt"; then
-  blocked="$(head -c 10000 "$run/blocked-worktree.md")
-(left uncommitted in the clone)" || die "could not read $run/blocked-worktree.md"
+  blocked_file=blocked-worktree.md
+fi
+if [ -n "$blocked_file" ]; then
+  blocked="$(jig_pr_excerpt "$jig_pr_blocked_max" "$run/$blocked_file" '    > ' \
+    "    > (cut: the whole text is in \`$run/$blocked_file\`)")" || die "could not read $run/$blocked_file"
+  [ -n "$blocked" ] || blocked="    > (empty)"
+  [ "$blocked_file" = blocked-branch.md ] || blocked="$blocked
+    > (left uncommitted in the clone)"
 fi
 
 title="$(sed -n 's/^# //p' "$run/plan.md" | sed -n 1p)" || die "could not read the title of $run/plan.md"
@@ -347,7 +353,7 @@ if [ -n "$blocked" ]; then
   reasons="$reasons JIG_BLOCKED.md;"
   note "The agent left JIG_BLOCKED.md:
 
-$(printf '%s\n' "$blocked" | sed 's/^/    > /')
+$blocked
 "
 fi
 if [ -n "$protected" ]; then
@@ -365,7 +371,7 @@ if [ -s "$run/status.txt" ]; then
   status_count=0
   while IFS= read -r line || [ -n "$line" ]; do
     status_count=$(( status_count + 1 ))
-    [ "$status_count" -gt "$list_max" ] || status_lines="$status_lines$(printable "$line")
+    [ "$status_count" -gt "$list_max" ] || status_lines="$status_lines$(jig_pr_line "$line")
 "
   done <"$run/status.txt"
   [ "$status_count" -le "$list_max" ] || status_lines="$status_lines... and $(( status_count - list_max )) more
@@ -376,7 +382,8 @@ if [ -s "$run/status.txt" ]; then
 $status_lines\`\`\`"
 fi
 
-summary="$(head -c 40000 "$run/summary.md")" || die "could not read $run/summary.md"
+summary="$(jig_pr_excerpt "$jig_pr_summary_max" "$run/summary.md" '' "
+*The summary is cut here: the whole message is in \`$run/summary.md\`.*")" || die "could not read $run/summary.md"
 [ -n "$summary" ] || summary="(the agent left no final message: see \`$run/claude.log\`)"
 if [ "$verify_status" = 0 ]; then verify_text="green"; else verify_text="red (exit $verify_status)"; fi
 agent_text="exit $agent_status"

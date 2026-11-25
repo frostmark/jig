@@ -299,9 +299,9 @@ fill 83 p >"$tmp/run/over.md"
 utf8="$(locale -a 2>/dev/null | grep -i -m 1 -E '^(c|en_us)\.utf-?8$')"
 top="$(printf '\342\206\222%.0s' $(seq 1 16))rr"
 equals "a body of exactly the limit keeps the whole plan" \
-  "$( (export LC_ALL="${utf8:-C}" && jig_pr_body_max=200 && jig_pr_body "$tmp/run/fits.md" "$top" t | bytes) 2>&1)" 200
+  "$( (cd "$tmp/run" && export LC_ALL="${utf8:-C}" && jig_pr_body_max=200 && jig_pr_body fits.md "$top" t | bytes) 2>&1)" 200
 equals "a plan one byte over the limit is cut, multibyte characters counted in bytes" \
-  "$( (export LC_ALL="${utf8:-C}" && jig_pr_body_max=200 && jig_pr_body "$tmp/run/over.md" "$top" t | sed -n 3p) 2>&1)" \
+  "$( (cd "$tmp/run" && export LC_ALL="${utf8:-C}" && jig_pr_body_max=200 && jig_pr_body over.md "$top" t | sed -n 3p) 2>&1)" \
   "<details><summary>Plan (cut)</summary>"
 
 for n in a b c d e f g h i j k l m n o p q r s t; do
@@ -363,6 +363,88 @@ Steps:
 end'
 equals "the open fence is cut after the lines that fit" "$(cut_open_fence | grep '^echo ' | sed -n '1p;$p')" 'echo 1
 echo 16'
+
+head_lines="$(for n in $(seq -w 1 20); do echo "line $n"; done)"
+equals "a head that leaves no room for the plan's note is cut after its last whole line that fits" \
+  "$( (cd "$tmp/run" && jig_pr_body_max=218 && jig_pr_body plan.md "$head_lines" end) 2>&1)" 'line 01
+line 02
+line 03
+
+*The description is cut here to stay within GitHub'"'"'s limit.*
+
+<details><summary>Plan (cut)</summary>
+
+*The plan is cut here: it has 220 bytes, the whole plan is in `plan.md`.*
+
+</details>
+
+end'
+equals "the cut head fills the limit exactly" \
+  "$( (cd "$tmp/run" && jig_pr_body_max=218 && jig_pr_body plan.md "$head_lines" end | bytes) 2>&1)" 218
+equals "a head line that would pass the limit by one byte is left out" \
+  "$( (cd "$tmp/run" && jig_pr_body_max=217 && jig_pr_body plan.md "$head_lines" end | sed -n 1,4p) 2>&1)" 'line 01
+line 02
+
+*The description is cut here to stay within GitHub'"'"'s limit.*'
+
+in_utf8() {
+  (export LC_ALL="${utf8:-C}" && "$@") 2>&1
+}
+equals "a text within the limit stays whole" "$(in_utf8 jig_cut 8 'ab
+cd
+ef')" 'ab
+cd
+ef'
+equals "a cut keeps the lines that fit" "$(in_utf8 jig_cut 7 'ab
+cd
+ef')" 'ab
+cd'
+equals "a cut right before a line break keeps that line" "$(in_utf8 jig_cut 5 'ab
+cd
+ef')" 'ab
+cd'
+arrows="$(printf '\342\206\222\342\206\222\342\206\222')"
+equals "a cut inside a multibyte character drops the whole character" "$(in_utf8 jig_cut 5 "$arrows" | bytes)" 3
+equals "a cut right after a multibyte character keeps it" "$(in_utf8 jig_cut 6 "$arrows" | bytes)" 6
+equals "no room, no text" "$(in_utf8 jig_cut 0 "$arrows")" ""
+
+equals "a line of the limit stays whole" "$(jig_pr_line "$(fill 200 x)")" "$(fill 200 x)"
+equals "a longer line is cut to the limit and marked" "$(jig_pr_line "$(fill 201 x)")" "$(fill 197 x)..."
+equals "a listed line is printable" "$(jig_pr_line "$(printf 'a\tb`c\342\206\222')")" 'a?b?c???'
+
+fill 30 '\n' >"$tmp/run/blank.md"
+equals "an excerpt quotes every line" "$(jig_pr_excerpt 200 "$tmp/run/blank.md" '> ' cut | sed -n '1p;30p')" '> 
+> '
+equals "quoted blank lines past the limit are cut on a line and end with the note" \
+  "$(jig_pr_excerpt 20 "$tmp/run/blank.md" '> ' '> (cut)')" '> 
+> 
+> 
+> 
+> (cut)'
+equals "a quoted excerpt fits the limit" "$(jig_pr_excerpt 20 "$tmp/run/blank.md" '> ' '> (cut)' | bytes)" 19
+printf 'ab\ncd' >"$tmp/run/exact.md"
+equals "an excerpt of exactly the limit stays whole" "$(jig_pr_excerpt 5 "$tmp/run/exact.md" '' cut)" 'ab
+cd'
+printf 'ab\ncd\nef' >"$tmp/run/lines.md"
+equals "an excerpt one byte over the limit is cut on a line and ends with the note" \
+  "$(jig_pr_excerpt 7 "$tmp/run/lines.md" '' X)" 'ab
+cd
+X'
+printf '%s' "$arrows$arrows" >"$tmp/run/arrows.md"
+equals "an excerpt without line breaks is cut on a character" \
+  "$(in_utf8 jig_pr_excerpt 11 "$tmp/run/arrows.md" '' '…' | od -An -tx1 | tr -d ' \n')" e28692e286920ae280a6
+for n in $(seq 1 2000); do
+  printf 'Повтор %s: проверь ответ.\n' "$n"
+done >"$tmp/run/summary.md"
+summary="$(in_utf8 jig_pr_excerpt 40000 "$tmp/run/summary.md" '' '
+*cut*')"
+checks=$(( checks + 1 ))
+size="$(printf '%s' "$summary" | bytes)"
+[ "$size" -le 40000 ] && [ "$size" -gt 39900 ] || fail "a long multibyte summary is cut to 40,000 bytes: $size bytes"
+checks=$(( checks + 1 ))
+printf '%s' "$summary" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || fail "a cut multibyte summary is valid UTF-8"
+equals "a cut summary ends with its note after a blank line" "$(printf '%s' "$summary" | tail -n 3 | sed 1d)" '
+*cut*'
 
 for n in $(seq 1 3000); do
   printf 'Step %s: change the handler and its spec.\n' "$n"
