@@ -17,7 +17,12 @@ repository's own instructions, the engine rules and your personal overlay (see [
 2. `origin` is the repository on GitHub. jig takes its `<owner>/<repo>` from the URL of `origin`
    (`git remote get-url origin`): `https://github.com/<owner>/<repo>`, `git@github.com:<owner>/<repo>`
    or `ssh://git@github.com/<owner>/<repo>`, with or without `.git`, a user, a port or a trailing `/`;
-   the host may be in any case. Owner and name keep the URL's spelling, and they name the overlay
+   the host may be in any case. An SSH host alias (`git@github-work:acme/shop.git`, also one that an
+   `insteadOf` rule rewrites `origin` to, since jig reads the rewritten URL) and
+   `ssh://git@ssh.github.com:443/...` are not accepted: keep `origin` at `git@github.com:<owner>/<repo>`
+   and choose the key or the port in SSH instead, with `git -C <repo> config core.sshCommand
+   'ssh -i ~/.ssh/<key>'` or a `Host github.com` block in `~/.ssh/config` (`Hostname ssh.github.com` and
+   `Port 443` for the port). Owner and name keep the URL's spelling, and they name the overlay
    directory, the run directories and the compose projects, so use GitHub's spelling, as its clone button
    gives it. Any other `origin`, and an owner or name of `.`, `..` or `.git` in any case (they would name
    directories that are not the repository's), stops jig with exit code 2 before anything runs. jig fetches from `origin`
@@ -83,7 +88,7 @@ file on the host.
 | `base` | required, once | The branch jig starts from and opens the PR against. Latin letters, digits, `.`, `_`, `/`, `-`, starting with a letter or digit, and a valid git branch name (`git check-ref-format`). |
 | `setup` | required, once | Script that prepares the environment (installs dependencies, creates databases). A path relative to the repository root: parts of latin letters, digits, `.`, `_`, `-` joined by `/`, no `.` or `..` parts, not starting with `-`. jig runs it before the agent starts, with `/workspace` as the working directory: a path under `.jig/` is a profile file and runs as `/jig/profile/<rest>` (see [Paths in the config](#paths-in-the-config)), any other path runs as `./<path>`. What it gets: [What setup and verify get](#what-setup-and-verify-get). |
 | `verify` | required, once | The check that decides green or red (tests, linters, build). Same rules as `setup`. The agent is asked to get it green; jig runs it again on the committed branch after the agent. |
-| `protect` | any number | Paths the agent must not change. A glob of latin letters, digits, `.`, `_`, `-`, `/` and `*`, not starting with `/`. `*` matches any characters including `/`: `deploy/*` covers everything under `deploy/`, `*/CLAUDE.md` every nested `CLAUDE.md`. A branch that changes a protected path becomes a draft PR. `.jig/` and the `setup` and `verify` scripts are always protected and need no line here; `JIG_BLOCKED.md` at the repository root is always allowed. |
+| `protect` | any number | Paths the agent must not change. A glob of latin letters, digits, `.`, `_`, `-`, `/` and `*`, not starting with `/`. `*` matches any characters including `/`: `deploy/*` covers everything under `deploy/`, `*/CLAUDE.md` every nested `CLAUDE.md`. A branch that changes a protected path becomes a draft PR, or with `deliver branch` a run that needs attention (exit code 1). `.jig/` and the `setup` and `verify` scripts are always protected and need no line here; `JIG_BLOCKED.md` at the repository root is always allowed. |
 | `model` | optional, once | The model the agent runs on, passed to Claude Code as `--model`: an alias such as `opus` or `sonnet[1m]`, or a full model name. Latin letters, digits, `.`, `_`, `:`, `@`, `/`, `[`, `]`, `-`, starting with a letter or digit, at most 100 characters. `JIG_MODEL` replaces it for one run. Without either, jig passes no `--model` and Claude Code's default applies. `jig smoke` checks the value and does not use it. |
 | `effort` | optional, once | The reasoning effort, passed to Claude Code as `--effort`: `low`, `medium`, `high`, `xhigh` or `max`. `JIG_EFFORT` replaces it for one run. Without either, jig passes no `--effort` and Claude Code's default applies. |
 | `deliver` | optional, once | How the branch is delivered: `pr` (the default) pushes it and opens a pull request, `branch` leaves it in your checkout with a report and pushes nothing (see [Branch delivery](#branch-delivery)). `jig smoke` checks the value and does not use it. |
@@ -115,7 +120,7 @@ This changes how existing profiles run: jig used to run `.jig/setup` as `./.jig/
   clone's copy from the base commit, as the agent may have changed it, never the overlay's.
 - The `verify` that jig runs on the committed branch after the agent is the profile's copy, from the base
   commit or the overlay, not a `.jig/verify` the agent changed and committed (such a change still makes
-  the PR a draft).
+  the PR a draft, or with `deliver branch` the run need attention).
 
 ### What setup and verify get
 
@@ -275,12 +280,14 @@ becomes part of the PR description. With `deliver branch`: jig hands the branch 
 path or `.github/` marks it for the owner's attention, and the final message goes into the run report.
 The final message's shape, What changes, Behaviour changes, Not done, How to check, is a default: the
 rules say that a shape given by the repository's instructions or by the rules after them (the overlay's
-`rules.md`, a team's PR template, for example) wins. jig fills in the `verify` command with its working directory
+`rules.md`, a team's PR template, for example) wins. The repository's own instructions are included on
+purpose: a repository that has taken its harness over from the overlay carries its team's template in
+its own `CLAUDE.md`. jig fills in the `verify` command with its working directory
 (`cd /workspace && ./<path>`, or `cd /workspace && /jig/profile/<rest>` for a path under `.jig/`) and the
 run's protected paths: `.jig/*`, the `setup` and `verify` scripts
 and the `protect` list of the profile's config, leaving out an entry that an earlier
 one already covers; the rules say that `JIG_BLOCKED.md` is allowed even when a
-pattern matches it. The draft decision below checks the same list. The prompt itself only names the plan:
+pattern matches it. The draft decision below (needs attention with `deliver branch`) checks the same list. The prompt itself only names the plan:
 `Implement the plan in /jig/plan.md.`
 
 ### Personal overlay
@@ -608,8 +615,8 @@ it was pushed).
 - `JIG_BLOCKED.md` at the repository root is how the agent says the plan cannot be done.
 - The engine rules are in the agent's system prompt in every run.
 - `.jig/` and the `setup` and `verify` scripts are protected whatever the `protect` list
-  says: a branch that changes them becomes a draft PR, so the agent cannot turn its own check green by
-  editing it.
+  says: a branch that changes them becomes a draft PR, or with `deliver branch` needs attention (exit
+  code 1), so the agent cannot turn its own check green by editing it unnoticed.
 - Changes under `.github/` are never pushed: `deliver pr` refuses the branch, `deliver branch` pushes
   nothing at all and lists them first under "Needs attention".
 - The model credential's value never leaves the run directory unredacted, and a branch carrying it is
@@ -643,22 +650,22 @@ it was pushed).
 `test/profile_test.sh` checks the `.jig/config` parser (`model`, `effort` and `deliver` included), the protected-path matching, loading the
 profile from a commit, the overlay's profile files (listed by git in an overlay repository, by the
 directory otherwise) and their validation, finding the base on a local bare `origin` (also from an
-overlay config), building the profile from both layers, `JIG_BASE` in the profile's compose file, the
-profile report with the overlay commit, and starting `bin/jig` through a symlink.
+overlay config, without writing `FETCH_HEAD`), building the profile from both layers, `JIG_BASE` in the profile's compose file, the
+profile report with the overlay commit and its warnings per delivery mode, and starting `bin/jig` through a symlink.
 `test/harness_test.sh` checks the repository's owner and name taken from the URL of `origin` (the URL
-forms, other hosts and malformed names refused, the URL never printed) and the `gh` check of `deliver pr`
-against a stand-in `gh`, the overlay lookup and its validation (a relative `JIG_PROFILES`, an
+forms, other hosts and malformed names, `.git` among them, refused, the URL never printed) and the `gh` check of `deliver pr`
+against a stand-in `gh`, the overlay lookup and its validation (an overlay directory spelled in another case, a relative `JIG_PROFILES`, an
 invalid `JIG_MODEL` or `JIG_EFFORT` stops `jig run` before the credential check), the rendered engine
-rules for both delivery modes, the system prompt, the compose override with the plan mount, the agent's arguments and prompt,
+rules for both delivery modes, the delivery mode named at launch, the system prompt, the compose override with the plan mount, the agent's arguments and prompt,
 `--model` and `--effort` from the profile and the environment, the agent line's model and effort and what it keeps from the log (values out of shape, more than five other models), the name warnings, the harness report on
 the terminal and in the PR, and the PR description (`lib/pr.sh`): the plan block, its fence and where it
 is cut, the caps on the agent's texts and lists, the last guard on the description's size, the
 issue line read from the plan with its launch text, the refused placeholder and the warnings for Issue
-lines that are not read, and the branch lines and the shell-quoted commands of `report.md`.
+lines that are not read, and the branch lines and the shell-quoted commands of `report.md` and the terminal.
 Both need bash and git 2.29 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
 
-`test/run_e2e.sh` runs `jig smoke` and twelve `jig run`s end to end against a local bare repository that
+`test/run_e2e.sh` runs `jig smoke` and fifteen `jig run`s end to end against a local bare repository that
 `origin`, `git@github.com:acme/shop.git`, reaches through a fake `ssh` (`GIT_SSH_COMMAND`), with a
 fake `claude` mounted over `/usr/local/bin/claude` (it records its arguments and names a model in its
 log) and a fake `gh` on `PATH` that records its calls, so it needs no credential and no network. With
@@ -670,7 +677,11 @@ and a run with a model and an effort from an overlay config and `JIG_MODEL` and 
 With `deliver branch` from an overlay config, where the fake `gh` fails if it is called at all: a clean
 run (the branch in the target checkout, nothing on `origin`, `report.md` and the terminal summary), a
 `.github/` change, a `.github/` change reverted inside the branch next to uncommitted changes, a run
-without commits, and an uncommitted file named after the credential, which only the report would carry. It also reads made-up
+without commits, a branch that does not start from the base (no `jig/<slug>` is left in the target), an
+uncommitted file named after the credential, which only the report would carry, a plan that carries the
+credential, and a log that names the credential as the model (the terminal shows it as `[REDACTED]`).
+After clean, refused and stopped runs alike, the target checkout's `FETCH_HEAD` is still the one the
+test wrote before them. It also reads made-up
 `claude.log`s with `lib/agent-log.js` in the image, values out of shape and past their limits among them. It runs only when
 `JIG_E2E_IMAGE` names a local image with bash, git, node and `timeout` (it is never pulled) and Docker is
 running, and skips otherwise: `JIG_E2E_IMAGE=<image> bash test/run_e2e.sh`. It needs what `jig run`
