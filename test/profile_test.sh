@@ -147,6 +147,59 @@ protect deploy/?" "cfg:4: protect must be"
 refused "protect with a backslash" "$valid
 protect deploy\\*" "cfg:4: protect must be"
 
+jig_parse_profile cfg <<<"$valid
+model claude-opus-5-5
+effort xhigh"
+equals "model" "$profile_model" claude-opus-5-5
+equals "effort" "$profile_effort" xhigh
+jig_parse_profile cfg <<<"$valid"
+equals "no model: the previous profile's model is gone" "$profile_model" ""
+equals "no effort: the previous profile's effort is gone" "$profile_effort" ""
+for model in opus 'sonnet[1m]' claude-opus-5-5-20260101 us.anthropic.claude-opus-5-5-v1:0 claude-opus-5-5@20260101 \
+  arn:aws:bedrock:us-east-1:123456789012:inference-profile/acme_model; do
+  parses "model $model" "$valid
+model $model"
+done
+model100="a$(printf '%99s' '' | tr ' ' 1)"
+parses "a model name of 100 characters" "$valid
+model $model100"
+refused "a model name of 101 characters" "$valid
+model ${model100}2" "cfg:4: model must be"
+for effort in low medium high xhigh max; do
+  parses "effort $effort" "$valid
+effort $effort"
+done
+refused "model starting with a dash" "$valid
+model -opus" "cfg:4: model must be a Claude Code model name or alias"
+refused "model starting with a dot" "$valid
+model .opus" "cfg:4: model must be"
+refused "model with a shell character" "$valid
+model opus;id" "cfg:4: model must be"
+refused "model with command substitution" 'base main
+setup s
+verify v
+model $(id)' "cfg:4: model must be"
+refused "model with a backtick" "$valid
+model opus\`id\`" "cfg:4: model must be"
+refused "model with a non-latin letter" "$valid
+model оpus" "cfg:4: model must be"
+refused "repeated model" "$valid
+model opus
+model sonnet" "cfg:5: model is already set on line 4"
+refused "effort that is not a level" "$valid
+effort extreme" "cfg:4: effort must be one of low, medium, high, xhigh, max"
+refused "effort in upper case" "$valid
+effort High" "cfg:4: effort must be one of"
+refused "effort with a level as its prefix" "$valid
+effort highest" "cfg:4: effort must be one of"
+refused "effort as a level's prefix" "$valid
+effort hig" "cfg:4: effort must be one of"
+refused "repeated effort" "$valid
+effort low
+effort max" "cfg:5: effort is already set on line 4"
+refused "the unknown key message lists the keys" "$valid
+colour red" "known keys: base, setup, verify, protect, model, effort"
+
 jig_parse_profile cfg <<<"base main
 setup bin/setup
 verify scripts/verify"

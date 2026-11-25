@@ -14,6 +14,8 @@ branch="jig/$slug"
 
 minutes="${JIG_TIMEOUT:-60}"
 [[ $minutes =~ $minutes_re ]] || jig_fail "JIG_TIMEOUT must be a positive whole number of minutes"
+jig_check_agent_env
+extract_js="$(cat "$engine_root/lib/agent-log.js")" || jig_fail "could not read $engine_root/lib/agent-log.js"
 jig_set_home
 jig_set_profiles
 
@@ -46,6 +48,7 @@ gh auth status --hostname github.com >/dev/null 2>&1 || jig_fail "gh is not logg
 jig_repo_identity
 jig_find_overlay
 jig_resolve_base
+jig_agent_options
 
 if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$branch"; then
   jig_fail "branch $branch already exists locally: pick another plan file name or git -C $repo_root branch -D $branch"
@@ -174,6 +177,15 @@ mkdir -p "$(dirname "$run")" || jig_fail "could not create $(dirname "$run")"
 mkdir "$run" || jig_fail "could not create $run"
 jig_extract_profile "$base" "$run" || die "could not put the profile of $base and the overlay into $run/profile"
 cp "$plan_abs" "$run/plan.md" || die "could not copy the plan to $run/plan.md"
+issue_status=0
+jig_plan_issue "$run/plan.md" || issue_status=$?
+if [ "$issue_status" = 2 ]; then
+  rm -rf "$run"
+  jig_fail "the Issue line of $plan still has the template's placeholder (a < or >): write #123 or a tracker ID, or delete the line"
+fi
+[ "$issue_status" = 0 ] || die "could not read the Issue line of $run/plan.md"
+echo "$jig_name: issue: $issue_text"
+jig_warn jig_issue_warnings
 jig_use_harness "$run/compose.harness.yml" "$run/system-prompt.md" "$run/plan.md" ||
   die "could not write the harness files into $run"
 jig_clone "$base" "$run/repo" || die "git clone failed"
@@ -191,6 +203,7 @@ jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_setup")" 
 
 prompt="$jig_plan_prompt"
 
+echo "$jig_name: agent $(jig_agent_settings)"
 echo "$jig_name: agent running, up to $minutes min (log: $run/claude.log)"
 agent_started=$(date +%s)
 agent_status=0
@@ -199,7 +212,7 @@ agent_status=0
   jig_compose exec -T -e "$cred_name" \
     -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME -e GIT_COMMITTER_EMAIL app \
     timeout -k 60 "${minutes}m" \
-    claude -p "$prompt" "${jig_harness_args[@]}" --dangerously-skip-permissions --output-format stream-json --verbose
+    claude -p "$prompt" "${jig_harness_args[@]}" ${jig_agent_args[@]+"${jig_agent_args[@]}"} --dangerously-skip-permissions --output-format stream-json --verbose
 ) </dev/null >"$run/claude.log" 2>&1 || agent_status=$?
 # On Ctrl-C docker compose exec exits with 130 instead of dying from SIGINT, so bash skips its INT trap.
 [ "$agent_status" != 130 ] || exit 130
@@ -236,30 +249,18 @@ if [ "$commits" != 0 ]; then
   echo "$jig_name: $profile_verify exit $verify_status"
 fi
 
-extract_js='
-let r = null;
-for (const line of require("fs").readFileSync(0, "utf8").split("\n")) {
-  if (!line.startsWith("{")) continue;
-  try { const m = JSON.parse(line); if (m && m.type === "result") r = m; } catch (e) {}
-}
-if (!r) process.exit(1);
-if (process.argv[1] === "meta") {
-  const cost = typeof r.total_cost_usd === "number" ? `, estimated cost $${r.total_cost_usd.toFixed(2)}` : "";
-  const outcome = r.is_error ? `error (${r.subtype})` : r.subtype;
-  process.stdout.write(`${outcome}, turns: ${r.num_turns}${cost}`);
-} else {
-  process.stdout.write(typeof r.result === "string" ? r.result : "");
-}'
 extract_status=0
 jig_compose exec -T app node -e "$extract_js" summary <"$run/claude.log" >"$run/summary.md" 2>/dev/null ||
   extract_status=$?
 [ "$extract_status" != 130 ] || exit 130
 [ "$extract_status" = 0 ] || : >"$run/summary.md"
 extract_status=0
-agent_meta="$(jig_compose exec -T app node -e "$extract_js" meta <"$run/claude.log" 2>/dev/null)" ||
+agent_log="$(jig_compose exec -T app node -e "$extract_js" meta <"$run/claude.log" 2>/dev/null)" ||
   extract_status=$?
 [ "$extract_status" != 130 ] || exit 130
-[ "$extract_status" = 0 ] || agent_meta=""
+[ "$extract_status" = 0 ] || agent_log=""
+agent_report="$(jig_agent_report "$agent_log")"
+echo "$jig_name: agent: $agent_report"
 
 teardown || die "docker compose down failed: remove project $jig_project by hand"
 [ "$jig_interrupted" = 0 ] || exit 130
@@ -268,7 +269,6 @@ remove_clone
 
 if [ "$commits" = 0 ]; then
   [ "$timed_out" = 0 ] || echo "$jig_name: the agent hit JIG_TIMEOUT=$minutes min and was stopped"
-  [ -z "$agent_meta" ] || echo "$jig_name: agent: $agent_meta"
   ! grep -q 'JIG_BLOCKED\.md$' "$run/status.txt" ||
     echo "$jig_name: the agent left JIG_BLOCKED.md uncommitted: see $run/blocked-worktree.md"
   [ ! -s "$run/status.txt" ] || echo "$jig_name: uncommitted changes were left in the clone: see $run/status.txt"
@@ -387,11 +387,14 @@ summary="$(jig_pr_excerpt "$jig_pr_summary_max" "$run/summary.md" '' "
 *The summary is cut here: the whole message is in \`$run_shown/summary.md\`.*")" || die "could not read $run/summary.md"
 [ -n "$summary" ] || summary="(the agent left no final message: see \`$run_shown/claude.log\`)"
 if [ "$verify_status" = 0 ]; then verify_text="green"; else verify_text="red (exit $verify_status)"; fi
-agent_text="exit $agent_status"
-[ -z "$agent_meta" ] || agent_text="$agent_text, $agent_meta"
+agent_text="exit $agent_status, $agent_report"
 
 body="$run/pr-body.md"
 pr_top="$(
+  if [ -n "$issue_line" ]; then
+    echo "$issue_line"
+    echo
+  fi
   echo "- $profile_verify: $verify_text"
   echo "- Agent: $agent_text"
   echo "- Duration: $(elapsed "$started") in total, agent $agent_duration (limit $minutes min)"

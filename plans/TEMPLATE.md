@@ -10,6 +10,15 @@ and the profile's verify command is green.
 
 # <The outcome, in one sentence>
 
+Issue: <ref>
+
+<!--
+The issue this plan implements: #123 for an issue of this repository (the PR description then starts
+with "Fixes #123", so merging the PR into the default branch closes it), or a tracker ID such as ABC-123
+(written at the top of the PR description as is). Delete the line when there is none. It stays right
+under the title.
+-->
+
 <!-- Why it is needed and what is wrong now. Two or three sentences. -->
 
 ## Product decisions
@@ -49,6 +58,6 @@ Mark what only a browser can show with "(check on the preview)": a person checks
 
 ## Links
 
-<!-- The issue (#123), files and places in the code, earlier PRs, external documents. -->
+<!-- Files and places in the code, related issues, earlier PRs, external documents. -->
 
 - 

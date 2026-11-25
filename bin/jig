@@ -23,6 +23,8 @@ usage() {
   echo "       jig smoke [--repo <path>]" >&2
   echo "  --repo <path>          the target repository (default: the git checkout of the current directory)" >&2
   echo "  JIG_TIMEOUT=<minutes>  run: limit for the agent run (default 60)" >&2
+  echo "  JIG_MODEL=<model>      run: Claude Code's --model, over the profile's model (default: Claude Code's)" >&2
+  echo "  JIG_EFFORT=<level>     run: Claude Code's --effort (low, medium, high, xhigh, max), over the profile's effort" >&2
   echo "  JIG_HOME=<dir>         where run and smoke directories live (default ~/.jig)" >&2
   echo "  JIG_PROFILES=<dir>     the personal overlay root (default \$JIG_HOME/profiles)" >&2
   echo "  CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (exactly one) authenticates the agent in run" >&2

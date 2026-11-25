@@ -73,6 +73,19 @@ if [ "$status" != 2 ] || [ "$out" != "jig: JIG_PROFILES must be an absolute path
   fail "a relative JIG_PROFILES stops jig run before the credential check: exit $status (output: $out)"
 fi
 
+run_with() {
+  (cd "$tmp" && env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY -u JIG_MODEL -u JIG_EFFORT JIG_HOME="$tmp/home" \
+    JIG_PROFILES=profiles "$@" "$root/bin/jig" run add-health-check.md --repo "$tmp/target" 2>&1)
+}
+exits_2 "a JIG_EFFORT that is not a level stops jig run before the credential check" \
+  "jig: JIG_EFFORT must be one of low, medium, high, xhigh, max" run_with JIG_EFFORT=extreme
+exits_2 "a JIG_MODEL outside the model characters stops jig run before the credential check" \
+  "jig: JIG_MODEL must be a Claude Code model name or alias" run_with 'JIG_MODEL=opus --verbose'
+exits_2 "a valid JIG_MODEL and JIG_EFFORT pass on to the next check" \
+  "jig: JIG_PROFILES must be an absolute path" run_with 'JIG_MODEL=sonnet[1m]' JIG_EFFORT=xhigh
+exits_2 "an empty JIG_MODEL and JIG_EFFORT count as unset" \
+  "jig: JIG_PROFILES must be an absolute path" run_with JIG_MODEL= JIG_EFFORT=
+
 mkdir -p "$overlay/plugin/skills/review"
 equals "an overlay with only a plugin" "$(found "$profiles")" "$overlay||$overlay/plugin"
 printf 'Prefer small functions.\n' >"$overlay/rules.md"
@@ -193,6 +206,106 @@ equals "agent arguments with a plugin" "$( (unset JIG_OVERLAY_PLUGIN; used) 2>&1
   "--append-system-prompt-file /jig/system-prompt.md --plugin-dir /jig/overlay|-f profile.yml -f $tmp/harness.yml|$tmp/prompt.md|$tmp/run/plan.md|$overlay/plugin"
 equals "the prompt names the mounted plan" "$jig_plan_prompt" "Implement the plan in /jig/plan.md."
 
+agent_options() {
+  (
+    profile_model="$1" profile_effort="$2"
+    unset JIG_MODEL JIG_EFFORT
+    [ "$3" = unset ] || export JIG_MODEL="$3"
+    [ "$4" = unset ] || export JIG_EFFORT="$4"
+    jig_agent_options && printf '%s|%s' "${jig_agent_args[*]+${jig_agent_args[*]}}" "$(jig_agent_settings)"
+  ) 2>&1
+}
+equals "no model or effort: no arguments, Claude Code's defaults" "$(agent_options "" "" unset unset)" \
+  "|model: default, effort: default"
+equals "the profile's model and effort" "$(agent_options opus high unset unset)" \
+  "--model opus --effort high|model: opus (from the profile), effort: high (from the profile)"
+equals "JIG_MODEL and JIG_EFFORT override the profile" "$(agent_options opus high 'sonnet[1m]' max)" \
+  "--model sonnet[1m] --effort max|model: sonnet[1m] (from JIG_MODEL), effort: max (from JIG_EFFORT)"
+equals "JIG_EFFORT alone overrides only the effort" "$(agent_options opus high unset low)" \
+  "--model opus --effort low|model: opus (from the profile), effort: low (from JIG_EFFORT)"
+equals "JIG_MODEL without a profile model, no effort" "$(agent_options "" "" claude-opus-5-5 unset)" \
+  "--model claude-opus-5-5|model: claude-opus-5-5 (from JIG_MODEL), effort: default"
+equals "only an effort from the profile" "$(agent_options "" medium unset unset)" \
+  "--effort medium|model: default, effort: medium (from the profile)"
+equals "empty JIG_MODEL and JIG_EFFORT leave the profile's values" "$(agent_options opus high "" "")" \
+  "--model opus --effort high|model: opus (from the profile), effort: high (from the profile)"
+
+fill() {
+  printf "%$1s" '' | tr ' ' "$2"
+}
+
+report() {
+  (
+    profile_model="$1" profile_effort="$2"
+    unset JIG_MODEL JIG_EFFORT
+    [ "$3" = unset ] || export JIG_MODEL="$3"
+    jig_agent_options && jig_agent_report "$4"
+  ) 2>&1
+}
+meta='success, turns: 3, estimated cost $0.01'
+equals "the model from the log next to turns and cost, with Claude Code's defaults" \
+  "$(report "" "" unset "$meta
+claude-sonnet-5-5
+0")" "$meta, model: claude-sonnet-5-5 (default), effort: default"
+equals "an alias from the profile and the model the log names" "$(report opus high unset "$meta
+claude-opus-5-5
+0")" "$meta, model: claude-opus-5-5 (opus from the profile), effort: high (from the profile)"
+equals "a model name that the log confirms is named once" "$(report "" "" claude-opus-5-5 "$meta
+claude-opus-5-5
+0")" "$meta, model: claude-opus-5-5 (from JIG_MODEL), effort: default"
+equals "the other models in the log follow the main one" "$(report "" "" unset "$meta
+claude-opus-5-5
+2 claude-haiku-5 claude-fake-2")" "$meta, model: claude-opus-5-5 (default), also claude-haiku-5 and claude-fake-2, effort: default"
+equals "a log without a result or a model" "$(report opus "" unset "")" \
+  "model: unknown (opus from the profile), effort: default"
+equals "a log with a result and no model" "$(report "" low unset "$meta
+
+0")" "$meta, model: unknown (default), effort: low (from the profile)"
+equals "a log without a main model names the other models" "$(report "" "" unset "$meta
+
+1 claude-fake-2")" "$meta, model: unknown (default), also claude-fake-2, effort: default"
+for kept in 'error (error_max_turns), turns: 9' 'error, turns: 3' 'turns: 3, estimated cost $0.01' \
+  'estimated cost $123456.78' success "$(fill 40 a), turns: 999999"; do
+  equals "an outcome, turns and cost in jig's shape are kept: $kept" "$(report "" "" unset "$kept
+claude-fake-1
+0")" "$kept, model: claude-fake-1 (default), effort: default"
+done
+for dropped in "success"$'\e]0;title\a' $'\e[2Jsuccess, turns: 3' '**success**, turns: 3' 'success, turns: 3 [x](y)' \
+  'Success, turns: 3' "$(fill 41 a), turns: 3" "error ($(fill 41 a)), turns: 3" 'success, turns: 1234567' 'success, turns: -1' \
+  'success, estimated cost $1234567.00' 'success, estimated cost $0.1' 'turns: 3, success' 'success, ' ', turns: 3'; do
+  equals "an outcome, turns and cost in another shape are dropped: $(printable "$dropped")" "$(report "" "" unset "$dropped
+claude-fake-1
+0")" "model: claude-fake-1 (default), effort: default"
+done
+for bad in $'claude\e[2J' 'has space' "a$(fill 100 b)" '-dash' 'x`y'; do
+  equals "a main model outside the model rule is unknown: $(printable "$bad")" "$(report "" "" unset "$meta
+$bad
+0")" "$meta, model: unknown (default), effort: default"
+done
+for count in x 01 -1 1234567 ''; do
+  equals "other models without a count of them are dropped: $count" "$(report "" "" unset "$meta
+claude-fake-1
+$count claude-haiku-5")" "$meta, model: claude-fake-1 (default), effort: default"
+done
+equals "other models outside the model rule are counted, not named" "$(report "" "" unset "$meta
+claude-fake-1
+4 claude-a x\`y claude-b $'\e[2J'")" "$meta, model: claude-fake-1 (default), also claude-a and claude-b and 2 more, effort: default"
+equals "other models past a fifth are counted, not named" "$(report "" "" unset "$meta
+claude-fake-1
+1000 $(for n in $(seq 1 1000); do printf 'claude-m%s ' "$n"; done)")" \
+  "$meta, model: claude-fake-1 (default), also claude-m1 and claude-m2 and claude-m3 and claude-m4 and claude-m5 and 995 more, effort: default"
+equals "only other models, all past the names given, are counted" "$(report "" "" unset "$meta
+claude-fake-1
+7")" "$meta, model: claude-fake-1 (default), also 7 more, effort: default"
+equals "lines after the other models are not read" "$(report "" "" unset "$meta
+claude-fake-1
+0
+1 claude-evil")" "$meta, model: claude-fake-1 (default), effort: default"
+mkdir "$tmp/glob" && : >"$tmp/glob/sonnet1"
+equals "a model name is not a file pattern" "$(cd "$tmp/glob" && report "" "" unset "$meta
+claude-fake-1
+1 sonnet[1m]")" "$meta, model: claude-fake-1 (default), also sonnet[1m], effort: default"
+
 repo_root="$tmp/repo"
 git init -q -b main "$repo_root"
 mkdir -p "$repo_root/.claude/skills/review" "$repo_root/.claude/skills/lint" "$repo_root/.claude/agents"
@@ -288,9 +401,6 @@ equals "the fence is longer than the plan's longest backtick run, wherever it is
   "$(jig_pr_body "$tmp/run/fenced.md" copy.md top end | sed -n '5p;11p')" '`````markdown
 `````'
 
-fill() {
-  printf "%$1s" '' | tr ' ' "$2"
-}
 bytes() {
   LC_ALL=C wc -c | tr -d ' '
 }
@@ -461,6 +571,86 @@ size="$(bytes <"$tmp/run/pr-body.md")"
 equals "the attribution follows the cut plan" "$(tail -n 3 "$tmp/run/pr-body.md")" "</details>
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+
+plan_issue() {
+  printf "$1" >"$tmp/run/issue.md"
+  jig_plan_issue "$tmp/run/issue.md"
+}
+issue() {
+  (plan_issue "$1" && printf '%s' "$issue_line") 2>&1
+}
+equals "an issue of the repository becomes Fixes" "$(issue '# Add a health check\n\nIssue: #12\n\nWhy.\n')" "Fixes #12"
+equals "the Issue line right under the title, without a blank line" "$(issue '# Title\nIssue: #12\n')" "Fixes #12"
+equals "blanks around the reference are dropped" "$(issue '# Title\n\nIssue:\t #12 \t\n')" "Fixes #12"
+equals "a plan with CRLF line ends" "$(issue '# Title\r\n\r\nIssue: #12\r\n\r\nWhy.\r\n')" "Fixes #12"
+equals "another tracker's ID is passed through" "$(issue '# Title\n\nIssue: ABC-123\n')" "Issue: ABC-123"
+equals "a number with letters is passed through" "$(issue '# Title\n\nIssue: #12a\n')" "Issue: #12a"
+equals "a number with a leading zero is passed through" "$(issue '# Title\n\nIssue: #012\n')" "Issue: #012"
+equals "issue zero is passed through" "$(issue '# Title\n\nIssue: #0\n')" "Issue: #0"
+equals "a bare # is passed through" "$(issue '# Title\n\nIssue: #\n')" "Issue: #"
+equals "two numbers are passed through" "$(issue '# Title\n\nIssue: #12 #13\n')" "Issue: #12 #13"
+equals "another repository's issue is passed through" "$(issue '# Title\n\nIssue: acme/web#12\n')" "Issue: acme/web#12"
+equals "a passed-through reference is printable" "$(issue '# Title\n\nIssue: ABC-1`id`\001\n')" "Issue: ABC-1?id??"
+equals "a passed-through reference is cut to 200 bytes" "$(issue "# Title\n\nIssue: $(fill 250 x)\n" | bytes)" 207
+equals "no Issue line" "$(issue '# Title\n\nWhy.\n\n## Links\n\n- #12\n')" ""
+equals "an empty Issue line" "$(issue '# Title\n\nIssue: \t\n\nWhy.\n')" ""
+
+launch() {
+  (plan_issue "$1" && printf '%s' "$issue_text") 2>&1
+}
+equals "the launch names the issue that the PR fixes" "$(launch '# Title\n\nIssue: #12\n')" "Fixes #12"
+equals "the launch names another reference as text" "$(launch '# Title\n\nIssue: ABC-1`id`\n')" "ABC-1?id? (as text)"
+equals "the launch says when there is no issue" "$(launch '# Title\n\nWhy.\n')" "none"
+
+placeholder() {
+  (plan_issue "$1"; echo "$?") 2>&1
+}
+equals "the template's placeholder left in the Issue line is refused" "$(placeholder '# Title\n\nIssue: <ref>\n')" 2
+equals "a < in the reference is refused" "$(placeholder '# Title\n\nIssue: ABC<123\n')" 2
+equals "a > in the reference is refused" "$(placeholder '# Title\n\nIssue: ABC->123\n')" 2
+equals "a placeholder on a line jig does not read is no error" "$(placeholder '# Title\n\nWhy.\n\nIssue: <ref>\n')" 0
+sed 's/^Issue: <ref>$/Issue: #12/' "$root/plans/TEMPLATE.md" >"$tmp/run/template.md"
+equals "the filled template gives Fixes and no warnings" \
+  "$( (jig_plan_issue "$tmp/run/template.md" && printf '%s|%s' "$issue_line" "$(jig_issue_warnings)") 2>&1)" "Fixes #12|"
+equals "the template as is is refused" "$( (jig_plan_issue "$root/plans/TEMPLATE.md"; echo "$?") 2>&1)" 2
+
+unread() {
+  (plan_issue "$1" && printf '%s|%s' "$issue_line" "$(jig_issue_warnings)") 2>&1
+}
+warning() {
+  printf "the plan's line %s is not read as its Issue line: %s (jig reads \"Issue: <ref>\" only as the first line under the title)" "$1" "$2"
+}
+equals "an Issue line after the first paragraph is not read" "$(unread '# Title\n\nWhy.\n\nIssue: #12\n')" "|$(warning 5 'Issue: #12')"
+equals "an Issue line before the title is not read" "$(unread 'Issue: #12\n# Title\n')" "|$(warning 1 'Issue: #12')"
+equals "an Issue line under a later heading is not read" "$(unread '# Title\n\nWhy.\n\n# Second\n\nIssue: #12\n')" \
+  "|$(warning 7 'Issue: #12')"
+equals "an Issue line under a second-level heading is not read" "$(unread '## Notes\n\nIssue: #12\n')" "|$(warning 3 'Issue: #12')"
+equals "a lowercase issue line is not read" "$(unread '# Title\n\nissue: #12\n')" "|$(warning 3 'issue: #12')"
+equals "an indented Issue line is not read" "$(unread '# Title\n\n  Issue: #12\n')" "|$(warning 3 '  Issue: #12')"
+equals "a bold Issue line is not read" "$(unread '# Title\n\nWhy.\n\n**Issue:** #5\n')" "|$(warning 5 '**Issue:** #5')"
+equals "an Issue word without a colon is not read" "$(unread '# Title\n\nIssue #12\n')" "|$(warning 3 'Issue #12')"
+equals "an indented Issue word without a colon is not read" "$(unread '# Title\n\nWhy.\n\n  Issue #12\n')" \
+  "|$(warning 5 '  Issue #12')"
+equals "a bold Issue word without a colon is not read" "$(unread '# Title\n\nWhy.\n\n**Issue** #5\n')" \
+  "|$(warning 5 '**Issue** #5')"
+equals "a longer word that starts with Issue is not read" "$(unread '# Title\n\nIssues: #12\n')" "|$(warning 3 'Issues: #12')"
+equals "a sentence that mentions an Issue line is not read" "$(unread '# Title\n\nSee Issue: #12\n')" \
+  "|$(warning 3 'See Issue: #12')"
+equals "a list item with an Issue label is not read" "$(unread '# Title\n\nWhy.\n\n- _issue_: #12\n')" \
+  "|$(warning 5 '- _issue_: #12')"
+equals "a tracker key that starts with issue is no line that is not read" "$(unread '# Title\n\nIssue: ISSUE-7\n')" \
+  "Issue: ISSUE-7|"
+equals "a second Issue line is not read" "$(unread '# Title\n\nIssue: #12\n\nIssue: #13\n')" "Fixes #12|$(warning 5 'Issue: #13')"
+equals "each line that is not read is named" "$(unread 'issue: #1\n# Title\n\nWhy.\n\nIssue: #12\n')" \
+  "|$(warning 1 'issue: #1')
+$(warning 6 'Issue: #12')"
+equals "a line that is not read is named without its CR" "$(unread '# Title\r\n\r\nWhy.\r\n\r\nissue: #12\r\n')" \
+  "|$(warning 5 'issue: #12')"
+equals "a line that is not read is named in 200 printable bytes" \
+  "$(unread "# Title\n\nWhy.\n\nIssue: \`$(fill 250 x)\n")" "|$(warning 5 "Issue: ?$(fill 189 x)...")"
+equals "the word issue in prose, a heading or a plural label is no Issue line" \
+  "$(unread '# Title\n\nIssue: #12\n\nThis fixes the issue where it fails.\n\nKnown issues: none.\n\nReissue: the token is renewed.\n\n## Issue: notes\n\n# Issue: another title\n')" \
+  "Fixes #12|"
 
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]

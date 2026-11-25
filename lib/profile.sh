@@ -11,15 +11,30 @@ jig_valid_path() {
   esac
 }
 
+jig_model_rule="must be a Claude Code model name or alias: latin letters, digits and . _ : @ / [ ] -, starting with a letter or digit, at most 100 characters"
+jig_effort_rule="must be one of low, medium, high, xhigh, max"
+
+jig_valid_model() {
+  local re='^[A-Za-z0-9][]A-Za-z0-9._:@/[-]*$' LC_ALL=C
+  [[ $1 =~ $re ]] && [ "${#1}" -le 100 ]
+}
+
+jig_valid_effort() {
+  case "$1" in
+    low | medium | high | xhigh | max) return 0 ;;
+  esac
+  return 1
+}
+
 jig_valid_pattern() {
   local re='^[A-Za-z0-9._*-][A-Za-z0-9._/*-]*$'
   [[ $1 =~ $re ]]
 }
 
 jig_parse_profile() {
-  local label="$1" line key value n=0 base_line=0 setup_line=0 verify_line=0 LC_ALL=C
+  local label="$1" line key value n=0 base_line=0 setup_line=0 verify_line=0 model_line=0 effort_line=0 LC_ALL=C
   local skip_re='^[[:blank:]]*(#|$)' line_re='^([a-z]+)[[:blank:]]+([^[:blank:]]+)[[:blank:]]*$'
-  profile_base="" profile_setup="" profile_verify=""
+  profile_base="" profile_setup="" profile_verify="" profile_model="" profile_effort=""
   profile_protect=()
   while IFS= read -r line || [ -n "$line" ]; do
     n=$(( n + 1 ))
@@ -49,8 +64,18 @@ jig_parse_profile() {
         jig_valid_pattern "$value" ||
           jig_fail "$label:$n: protect must be a pattern of latin letters, digits, . _ - / and *, not starting with /"
         profile_protect+=("$value") ;;
+      model)
+        [ "$model_line" = 0 ] || jig_fail "$label:$n: model is already set on line $model_line"
+        jig_valid_model "$value" || jig_fail "$label:$n: model $jig_model_rule"
+        model_line=$n
+        profile_model="$value" ;;
+      effort)
+        [ "$effort_line" = 0 ] || jig_fail "$label:$n: effort is already set on line $effort_line"
+        jig_valid_effort "$value" || jig_fail "$label:$n: effort $jig_effort_rule"
+        effort_line=$n
+        profile_effort="$value" ;;
       *)
-        jig_fail "$label:$n: unknown key $key (known keys: base, setup, verify, protect)" ;;
+        jig_fail "$label:$n: unknown key $key (known keys: base, setup, verify, protect, model, effort)" ;;
     esac
   done
   [ "$base_line" != 0 ] || jig_fail "$label: missing the required key base"

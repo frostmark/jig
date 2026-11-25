@@ -71,11 +71,17 @@ file on the host.
 | `setup` | required, once | Script that prepares the environment (installs dependencies, creates databases). A path relative to the repository root: parts of latin letters, digits, `.`, `_`, `-` joined by `/`, no `.` or `..` parts, not starting with `-`. jig runs it before the agent starts, with `/workspace` as the working directory: a path under `.jig/` is a profile file and runs as `/jig/profile/<rest>` (see [Paths in the config](#paths-in-the-config)), any other path runs as `./<path>`. What it gets: [What setup and verify get](#what-setup-and-verify-get). |
 | `verify` | required, once | The check that decides green or red (tests, linters, build). Same rules as `setup`. The agent is asked to get it green; jig runs it again on the committed branch after the agent. |
 | `protect` | any number | Paths the agent must not change. A glob of latin letters, digits, `.`, `_`, `-`, `/` and `*`, not starting with `/`. `*` matches any characters including `/`: `deploy/*` covers everything under `deploy/`, `*/CLAUDE.md` every nested `CLAUDE.md`. A branch that changes a protected path becomes a draft PR. `.jig/` and the `setup` and `verify` scripts are always protected and need no line here; `JIG_BLOCKED.md` at the repository root is always allowed. |
+| `model` | optional, once | The model the agent runs on, passed to Claude Code as `--model`: an alias such as `opus` or `sonnet[1m]`, or a full model name. Latin letters, digits, `.`, `_`, `:`, `@`, `/`, `[`, `]`, `-`, starting with a letter or digit, at most 100 characters. `JIG_MODEL` replaces it for one run. Without either, jig passes no `--model` and Claude Code's default applies. `jig smoke` checks the value and does not use it. |
+| `effort` | optional, once | The reasoning effort, passed to Claude Code as `--effort`: `low`, `medium`, `high`, `xhigh` or `max`. `JIG_EFFORT` replaces it for one run. Without either, jig passes no `--effort` and Claude Code's default applies. |
 
-An unknown key, a missing required key, a repeated `base`, `setup` or `verify`, or a value outside its
-character set stops jig with exit code 2 before anything runs; the message names the file and the line,
+An unknown key, a missing required key, a repeated `base`, `setup`, `verify`, `model` or `effort`, or a
+value outside its character set stops jig with exit code 2 before anything runs; the message names the file and the line,
 for example `jig: origin/main:.jig/config:4: unknown key colour` (or the overlay's `config` with its
 path). jig also stops with code 2 when the profile lacks `compose.yml` or a `setup` or `verify` script.
+
+`model` and `effort` (or `JIG_MODEL` and `JIG_EFFORT`) need a Claude Code in the profile's image that
+has `--model` and `--effort`. jig does not check the version: with an older CLI the agent fails at
+start, and the reason is in `claude.log`.
 
 ### Paths in the config
 
@@ -297,7 +303,8 @@ jig writes `system-prompt.md` (the engine rules, then the overlay's `rules.md`) 
 the plan's copy `plan.md` at `/jig/plan.md` and `plugin/` at `/jig/overlay` in `app`, all read-only and
 outside `/workspace`, and starts the agent
 with `--append-system-prompt-file /jig/system-prompt.md` and, when there is a plugin,
-`--plugin-dir /jig/overlay`. The plugin directory is mounted as it is on disk, so edits to it during a
+`--plugin-dir /jig/overlay`, followed by `--model` and `--effort` when they are set (see
+[`.jig/config`](#jigconfig)). The plugin directory is mounted as it is on disk, so edits to it during a
 run are visible in the container.
 
 ### What wins
@@ -337,6 +344,19 @@ branch `jig/<slug>`. The file can live anywhere. At launch jig copies it to `pla
 directory and mounts that copy read-only at `/jig/plan.md`; the prompt is
 `Implement the plan in /jig/plan.md.` Changing the file after launch does not change the run.
 
+Right under the title goes the issue the plan implements, as `Issue: <ref>`. jig reads it from the
+first line after the plan's first `# ` heading that is not blank, so it must come before any other text.
+With an issue of the repository, `#123`, the PR description starts with `Fixes #123`, and merging the PR
+closes the issue (GitHub reads closing keywords only in PRs into the repository's default branch). Any
+other reference, such as a tracker ID, opens the description as is: `Issue: ABC-123` (printable ASCII,
+at most 200 bytes). A plan without the line, or with an empty one, gets neither. jig reads the line
+from the plan's copy at launch and prints what it found: `jig: issue: Fixes #123`,
+`jig: issue: ABC-123 (as text)` or `jig: issue: none`. A reference with `<` or `>`, such as the
+template's `<ref>` left in, stops jig with code 2 before anything runs, and the run directory is
+removed. Any other line that looks like an Issue line gets a warning naming it, because jig does not
+read it: a line that starts with `issue` in any case, also indented or in bold (`**Issue:** #5`), or
+one with `Issue:` after other text. Headings are not checked.
+
 The plan is never committed: the branch holds only the agent's commits, and the reasoning behind a change
 belongs in the issue and the PR description. The PR description ends with the plan text in a collapsed
 "Plan" block, just before the attribution line. The plan sits in a fenced `markdown` code block whose
@@ -362,24 +382,48 @@ cd ~/src/shop
 jig smoke                                          # build the image, run setup and verify on HEAD
 jig run plans/add-health-check.md
 JIG_TIMEOUT=30 jig run plans/add-health-check.md   # the agent's limit in minutes, 60 by default
+JIG_MODEL=opus JIG_EFFORT=high jig run plans/add-health-check.md   # over the profile's model and effort
 jig run ~/plans/add-health-check.md --repo ~/src/shop
 ```
 
 `--repo` defaults to the git checkout of the current directory. The plan path is relative to the
 current directory. `JIG_HOME` (an absolute path, `~/.jig` by default) holds run and smoke directories;
-`JIG_PROFILES` (an absolute path, `$JIG_HOME/profiles` by default) is the overlay root.
+`JIG_PROFILES` (an absolute path, `$JIG_HOME/profiles` by default) is the overlay root. `JIG_MODEL` and
+`JIG_EFFORT` replace the profile's `model` and `effort` for one run and follow the same rules; an empty
+value counts as unset, and an invalid one stops jig with code 2 before anything runs.
 
 What `jig run` does: precondition checks → the overlay lookup → the base and the profile (`.jig/` of
 `origin/<base>` with the overlay's profile files over it) → the profile and harness sources printed →
-the profile, the plan's copy, the system prompt and the compose overrides written to the run directory →
+the profile and the plan's copy written to the run directory → the plan's Issue line read and printed →
+the system prompt and the compose overrides written to the run directory →
 a clone of that commit in `$JIG_HOME/runs/<owner>/<repo>/<slug>/repo` → compose project
 `jig-run_<owner>_<repo>_<slug>` (no ports on the host; owner and repo lowercased, characters other than
 latin letters, digits and `-` turned into `-`) → the branch `jig/<slug>` and `setup` in the container →
-`claude -p` under the time limit → the branch leaves the container as a bundle → uncommitted changes are
+`claude -p` under the time limit, with `--model` and `--effort` when set → the branch leaves the container as a bundle → uncommitted changes are
 discarded (`git checkout -f`, `git clean -fd`, also in the middle of an abandoned merge or rebase) and
 `verify` runs on the committed branch → `docker compose down -v` (always: on errors and on Ctrl-C, even a
 repeated one) and removal of the clone → on the host: fetch the branch, check it, `git push origin`,
 `gh pr create --base <base>`.
+
+The PR description starts with the plan's issue line (`Fixes #123` or `Issue: ABC-123`, see
+[Plan](#plan)), then the result of `verify`, the agent, the duration and the path of `claude.log`. The
+agent line has the agent's exit code, the outcome, turns and estimated cost from `claude.log`, the model
+the agent ran on and the effort:
+
+```
+- Agent: exit 0, success, turns: 15, estimated cost $1.23, model: claude-opus-5-5 (opus from the profile), effort: high (from JIG_EFFORT)
+```
+
+The model is the one `claude.log` names when the session starts, or `unknown` when it names none. In
+parentheses: `default` when jig passed no `--model`, otherwise the value jig passed and where it came
+from (`the profile` or `JIG_MODEL`), only the source when the log names the same model. Other models the
+run used, by subagents for example, follow as `also <model>`: five at most, then `and N more`. The
+agent can write to its own log, so jig takes from it only values of its own shape and leaves out the
+rest: an outcome of lowercase letters and `_` (40 at most), whole turns, a cost below a million dollars,
+and model names that follow the rule of the `model` key. The effort is not in the log: it is the value
+jig passed with its source, or `default`. The terminal shows the
+requested model and effort before the agent starts (`jig: agent model: ..., effort: ...`) and the same
+text as the PR's agent line after it (`jig: agent: ...`), in a run without commits too.
 
 The PR is opened as a draft if `verify` is red, the time limit hit, the agent exited with an error, left
 `JIG_BLOCKED.md` or uncommitted changes, changed a protected path (`.jig/`, the `setup` and `verify`
@@ -437,7 +481,8 @@ with 2 (the output above the last line tells which).
 
 The run directory `$JIG_HOME/runs/<owner>/<repo>/<slug>/` stays after the run:
 
-- `claude.log`: the agent's full output (`stream-json`);
+- `claude.log`: the agent's full output (`stream-json`), where jig finds the outcome, turns, cost and
+  models for the agent line;
 - `plan.md`: the copy of the plan that the agent read at `/jig/plan.md`;
 - `setup.log`, `verify.log`: the environment setup and `verify` (no `verify.log` when the agent made no
   commits);
@@ -500,23 +545,30 @@ it was pushed).
 
 ## Tests
 
-`test/profile_test.sh` checks the `.jig/config` parser, the protected-path matching, loading the
+`test/profile_test.sh` checks the `.jig/config` parser (`model` and `effort` included), the protected-path matching, loading the
 profile from a commit, the overlay's profile files (listed by git in an overlay repository, by the
 directory otherwise) and their validation, finding the base on a local bare `origin` (also from an
 overlay config), building the profile from both layers, `JIG_BASE` in the profile's compose file, the
 profile report with the overlay commit, and starting `bin/jig` through a symlink.
-`test/harness_test.sh` checks the overlay lookup and its validation (a relative `JIG_PROFILES` stops
-`jig run` before the credential check), the rendered engine rules, the system prompt, the compose
-override with the plan mount, the agent's arguments and prompt, the name warnings, the harness report on
+`test/harness_test.sh` checks the overlay lookup and its validation (a relative `JIG_PROFILES`, an
+invalid `JIG_MODEL` or `JIG_EFFORT` stops `jig run` before the credential check), the rendered engine
+rules, the system prompt, the compose override with the plan mount, the agent's arguments and prompt,
+`--model` and `--effort` from the profile and the environment, the agent line's model and effort and what it keeps from the log (values out of shape, more than five other models), the name warnings, the harness report on
 the terminal and in the PR, and the PR description (`lib/pr.sh`): the plan block, its fence and where it
-is cut, the caps on the agent's texts and lists, and the last guard on the description's size.
+is cut, the caps on the agent's texts and lists, the last guard on the description's size, and the
+issue line read from the plan with its launch text, the refused placeholder and the warnings for Issue
+lines that are not read.
 Both need bash and git 2.28 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
 
-`test/run_e2e.sh` runs `jig smoke` and four `jig run`s end to end against a local bare `origin`, with a
-fake `claude` mounted over `/usr/local/bin/claude` and a fake `gh` on `PATH`, so it needs no credential
-and no network: a clean run, a run without commits, a run with oversized agent output and a plan cut
-inside its own code fence, and a plan whose only heading carries the credential. It runs only when
+`test/run_e2e.sh` runs `jig smoke` and six `jig run`s end to end against a local bare `origin`, with a
+fake `claude` mounted over `/usr/local/bin/claude` (it records its arguments and names a model in its
+log) and a fake `gh` on `PATH`, so it needs no credential and no network: a clean run with `Fixes #12`
+and no model or effort, a run without commits and with a misplaced Issue line, a plan with the
+template's `<ref>` left in its Issue line (it stops before anything runs), a run with oversized agent output (a log with control characters in its outcome and 1,000 models among it) and a plan cut inside
+its own code fence, a plan whose only heading carries the credential, and a run with a model and an
+effort from an overlay config and `JIG_MODEL` and another tracker's issue. It also reads made-up
+`claude.log`s with `lib/agent-log.js` in the image, values out of shape and past their limits among them. It runs only when
 `JIG_E2E_IMAGE` names a local image with bash, git, node and `timeout` (it is never pulled) and Docker is
 running, and skips otherwise: `JIG_E2E_IMAGE=<image> bash test/run_e2e.sh`. It needs what `jig run`
 needs on the host (git 2.49 or newer) and removes its compose projects and files.
