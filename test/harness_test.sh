@@ -1166,7 +1166,7 @@ inspect() {
   (
     jig_project=jig-run_acme_shop_x gh_repo=acme/shop
     jig_compose_files=(-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml)
-    profile_build_secrets=(E2E_SECRET E2E_KEY)
+    read -r -a profile_build_secrets <<<"${inspect_names-E2E_SECRET E2E_KEY}"
     export E2E_SECRET='real:value/&' E2E_KEY=real-key
     if jig_check_compose "$tmp/compose"; then
       printf 'ok|%s|%s' "${jig_build_services[*]-}" "${jig_compose_files[*]}"
@@ -1179,7 +1179,7 @@ fixture=build
 equals "services that build are found and get jig's label file" "$(inspect)" \
   "ok|app worker|-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml -f $tmp/compose/compose.build.yml"
 equals "the config is read with markers in place of the build secrets' values" "$(cat "$tmp/docker.calls")" \
-  "compose -p jig-run_acme_shop_x -f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml config --format json|E2E_SECRET=jig_build_secret_marker_E2E_SECRET"
+  "compose -p jig-run_acme_shop_x -f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml config --format json|E2E_SECRET=jig_build_secret_marker_E2E_SECRET_end"
 equals "the label file labels each service that builds with the repository" "$(cat "$tmp/compose/compose.build.yml")" 'services:
   "app":
     build:
@@ -1198,6 +1198,8 @@ equals "a build secret's name in a service's environment is refused" "$(inspect)
 fixture=env_value
 equals "a build secret's value in another variable is refused" "$(inspect)" \
   "refused|the value of the build secret E2E_SECRET reaches the compose project (docker compose config resolves \${E2E_SECRET} in it: in an environment value, a build arg, a label or elsewhere): jig never passes a build secret into a container. The build gets it from a top-level secret with environment: E2E_SECRET"
+equals "a build secret whose name starts another's is not named for the other's marker" "$(inspect_names='E2E_SEC E2E_SECRET' inspect | cut -d: -f1)" \
+  "refused|the value of the build secret E2E_SECRET reaches the compose project (docker compose config resolves \${E2E_SECRET} in it"
 fixture=arg_value
 equals "a build secret's value in a build arg is refused" "$(inspect | cut -d: -f1)" \
   "refused|the value of the build secret E2E_SECRET reaches the compose project (docker compose config resolves \${E2E_SECRET} in it"

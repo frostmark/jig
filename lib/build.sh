@@ -64,7 +64,7 @@ jig_with_build_secrets() (
 )
 
 jig_build_secret_marker() {
-  printf 'jig_build_secret_marker_%s' "$1"
+  printf 'jig_build_secret_marker_%s_end' "$1"
 }
 
 jig_is_build_secret() {
