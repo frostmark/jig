@@ -160,6 +160,11 @@ for model in opus 'sonnet[1m]' claude-opus-5-5-20260101 us.anthropic.claude-opus
   parses "model $model" "$valid
 model $model"
 done
+model100="a$(printf '%99s' '' | tr ' ' 1)"
+parses "a model name of 100 characters" "$valid
+model $model100"
+refused "a model name of 101 characters" "$valid
+model ${model100}2" "cfg:4: model must be"
 for effort in low medium high xhigh max; do
   parses "effort $effort" "$valid
 effort $effort"

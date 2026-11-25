@@ -11,12 +11,12 @@ jig_valid_path() {
   esac
 }
 
-jig_model_rule="must be a Claude Code model name or alias: latin letters, digits and . _ : @ / [ ] -, starting with a letter or digit"
+jig_model_rule="must be a Claude Code model name or alias: latin letters, digits and . _ : @ / [ ] -, starting with a letter or digit, at most 100 characters"
 jig_effort_rule="must be one of low, medium, high, xhigh, max"
 
 jig_valid_model() {
   local re='^[A-Za-z0-9][]A-Za-z0-9._:@/[-]*$' LC_ALL=C
-  [[ $1 =~ $re ]]
+  [[ $1 =~ $re ]] && [ "${#1}" -le 100 ]
 }
 
 jig_valid_effort() {
