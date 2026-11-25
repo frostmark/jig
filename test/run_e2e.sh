@@ -844,6 +844,16 @@ equals "a smoke whose app service takes the build secret as a runtime secret exi
 equals "the runtime secret is named as the last thing on the terminal" "$(tail -n 1 "$tmp/err")" \
   "jig: the build secret E2E_BUILD_SECRET reaches the service app as its runtime secret e2e (the top-level secret e2e takes environment: E2E_BUILD_SECRET): jig never passes a build secret into a container. Remove e2e from the service's secrets; the build gets it under build: secrets:"
 lacks "the runtime secret stops smoke before the build" "$tmp/out" "building app"
+printf "OTHER_TOKEN='%s'\n" "$build_secret" >"$overlay/build.env"
+sed 's|^      HOME: /tmp$|      HOME: /tmp\
+    env_file: build.env|' "$tmp/compose-build.yml" >"$overlay/compose.yml"
+(export E2E_RUN=$build_id-env-file && jig smoke)
+equals "a smoke whose env_file carries the build secret's value under another name exits 2" "$?" 2
+equals "the value from the env_file is named as the last thing on the terminal" "$(tail -n 1 "$tmp/err")" \
+  "jig: the value of the build secret E2E_BUILD_SECRET is in the compose project that docker compose config resolves (an env_file or another variable holds it): jig never passes a build secret into a container. Remove the value from there; the build gets it from a top-level secret with environment: E2E_BUILD_SECRET"
+lacks "the value from the env_file stops smoke before the build" "$tmp/out" "building app"
+no_secret "$tmp/out" "$tmp/err"
+rm "$overlay/build.env"
 cp "$tmp/compose-build.yml" "$overlay/compose.yml"
 
 (export E2E_RUN=$build_id-disk JIG_MIN_FREE_GB=999999 && jig smoke)

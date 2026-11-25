@@ -315,8 +315,11 @@ Then `jig run` and `jig smoke`:
   `env_file` included), hands it to a service at runtime (a top-level secret or config with
   `environment: BUNDLE_GITHUB__COM` listed in the service's own `secrets` or `configs`, not under its
   `build`), or resolves the variable anywhere else (`${BUNDLE_GITHUB__COM}` in another variable, a build
-  arg or a label). jig reads that project with a marker in place of each value, so the value is never in
-  what it reads. So a build secret reaches no container: only `docker compose build` gets it;
+  arg or a label). jig reads that project with a marker in place of each value, so the value is not in
+  what it reads unless something else puts it there: jig also looks for each value in the project, as it
+  is and as compose writes it (`$` doubled, JSON-escaped), and stops when an `env_file` or another
+  variable holds it. So a
+  build secret reaches no container: only `docker compose build` gets it;
 - look for each value as for the model credential: the branch is not kept or pushed when it carries one
   (see [Usage](#usage)), and the run directory's logs get `[REDACTED]` in its place. The build's output is
   redacted before it reaches the terminal and `build.log`, so a `RUN` step that prints a secret shows
@@ -756,14 +759,15 @@ credential and the build secrets (values with `:`, `/`, `&`, regex and glob char
 overlapping values, the JSON form, a stream redacted line by line as it comes), the build secrets read from
 the environment and removed from it, the builder of the Docker context or `BUILDX_BUILDER`, the disk check against a stand-in
 `df` and `docker`, reading `docker compose config` (a build secret's name in a service's environment, a
-runtime secret or config that takes it, its value resolved anywhere, the services that build, jig's label
+runtime secret or config that takes it, its value resolved anywhere, the value itself as it is or
+JSON-escaped, the services that build, jig's label
 file) and the build with its log and the prune against a stand-in `docker` that records which calls get
 the build secret; stand-ins for `grep`, `awk`, `sed` and the other commands on that path record their
 command lines, and none carries a secret value.
 Both need bash and git 2.29 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
 
-`test/run_e2e.sh` runs eight `jig smoke`s and twenty `jig run`s end to end against a local bare repository that
+`test/run_e2e.sh` runs nine `jig smoke`s and twenty `jig run`s end to end against a local bare repository that
 `origin`, `git@github.com:acme/shop.git`, reaches through a fake `ssh` (`GIT_SSH_COMMAND`), with a
 fake `claude` mounted over `/usr/local/bin/claude` (it records its arguments and names a model in its
 log) and a fake `gh` on `PATH` that records its calls, so it needs no credential and no network. With
@@ -781,8 +785,9 @@ credential, and a log that names the credential as the model (the terminal shows
 After clean, refused and stopped runs alike, the target checkout's `FETCH_HEAD` is still the one the
 test wrote before them. Then an overlay profile builds an image from `JIG_E2E_IMAGE` with a build secret
 whose value has `:`, `/`, `&` and regex characters and that a `RUN` step prints: an unset or empty secret,
-the secret's name in the `app` environment, its value resolved into another variable and the secret
-handed to `app` as a runtime secret stop jig before the build, and so do too little disk (`JIG_MIN_FREE_GB`) and an invalid `JIG_MIN_FREE_GB`; a
+the secret's name in the `app` environment, its value resolved into another variable, the secret
+handed to `app` as a runtime secret and its value in an `env_file` under another name stop jig before
+the build, and so do too little disk (`JIG_MIN_FREE_GB`) and an invalid `JIG_MIN_FREE_GB`; a
 `BUILDX_BUILDER` that is set is the builder compose uses, and without it the Docker context's; the build's
 output is redacted on the terminal and in `build.log`, the image carries `jig.repo=acme/shop`, a green
 smoke removes its clone and a red one keeps it; a plan that carries the secret is refused with

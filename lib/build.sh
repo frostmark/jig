@@ -67,6 +67,18 @@ jig_build_secret_marker() {
   printf 'jig_build_secret_marker_%s_end' "$1"
 }
 
+jig_config_forms() {
+  local value
+  for value in "$1" "${1//\$/\$\$}"; do
+    printf '%s\n' "$value"
+    printf '%s\n' "$value" | LC_ALL=C sed -e 's/[\\"]/\\&/g' -e p -e 's/&/\\u0026/g' -e 's/</\\u003c/g' -e 's/>/\\u003e/g'
+  done
+}
+
+jig_config_has_value() {
+  printf '%s\n' "$1" | LC_ALL=C grep -a -F -f <(jig_config_forms "$2") >/dev/null
+}
+
 jig_is_build_secret() {
   local name
   for name in ${profile_build_secrets[@]+"${profile_build_secrets[@]}"}; do
@@ -114,7 +126,7 @@ jig_write_build_compose() {
 }
 
 jig_check_compose() {
-  local dir="$1" config facts kind service name source variable app=0
+  local dir="$1" config facts kind service name source variable status i app=0
   jig_build_services=()
   jig_compose_problem=""
   config="$(
@@ -154,6 +166,19 @@ jig_check_compose() {
     case "$config" in
       *"$(jig_build_secret_marker "$name")"*)
         jig_compose_problem="the value of the build secret $name reaches the compose project (docker compose config resolves \${$name} in it: in an environment value, a build arg, a label or elsewhere): jig never passes a build secret into a container. The build gets it from a top-level secret with environment: $name"
+        return 1 ;;
+    esac
+  done
+  for i in ${profile_build_secrets[@]+"${!profile_build_secrets[@]}"}; do
+    status=0
+    jig_config_has_value "$config" "${jig_build_values[i]}" || status=$?
+    case "$status" in
+      0)
+        jig_compose_problem="the value of the build secret ${profile_build_secrets[i]} is in the compose project that docker compose config resolves (an env_file or another variable holds it): jig never passes a build secret into a container. Remove the value from there; the build gets it from a top-level secret with environment: ${profile_build_secrets[i]}"
+        return 1 ;;
+      1) ;;
+      *)
+        jig_compose_problem="could not search docker compose config for the build secrets' values"
         return 1 ;;
     esac
   done

@@ -1111,6 +1111,10 @@ sed 's/"HOME": "\/tmp",/"E2E_SECRET": "@E2E_SECRET@",\
         "HOME": "\/tmp",/' "$tmp/compose/build.json" >"$tmp/compose/env_name.json"
 sed 's/"HOME": "\/tmp",/"TOKEN": "x@E2E_SECRET@y",/' "$tmp/compose/build.json" >"$tmp/compose/env_value.json"
 sed 's/"E2E_SECRET": "uid"/"UID": "@E2E_SECRET@"/' "$tmp/compose/build.json" >"$tmp/compose/arg_value.json"
+sed 's/"HOME": "\/tmp",/"OTHER_TOKEN": "real:$$v\/\\u0026\\u003c\\"x\\\\1\\u003e",/' "$tmp/compose/build.json" >"$tmp/compose/value_go.json"
+sed 's/"HOME": "\/tmp",/"OTHER_TOKEN": "real:$v\/\&<\\"x\\\\1>",/' "$tmp/compose/build.json" >"$tmp/compose/value_json.json"
+sed 's/"E2E_SECRET": "service label"/"KEY": "a real-E2E_KEY-value b"/' "$tmp/compose/build.json" >"$tmp/compose/value_raw.json"
+sed 's/"HOME": "\/tmp",/"OTHER_TOKEN": "real:$$v\/\\u0026\\u003c\\"x\\\\2\\u003e real:$v\/\&<\\"x\\\\2> real-E2E_KEY-valu",/' "$tmp/compose/build.json" >"$tmp/compose/value_near.json"
 sed '/"worker": {/,/^    }$/d; s/^    "db.1": {/    "worker": {/; /^      "build": {/,/^      },$/d' "$tmp/compose/build.json" >"$tmp/compose/no_build.json"
 sed 's/"app": {/"web": {/' "$tmp/compose/build.json" >"$tmp/compose/no_app.json"
 sed -e 's/^  "name": "jig-run_acme_shop_x",$/  "configs": {\
@@ -1167,7 +1171,13 @@ inspect() {
     jig_project=jig-run_acme_shop_x gh_repo=acme/shop
     jig_compose_files=(-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml)
     read -r -a profile_build_secrets <<<"${inspect_names-E2E_SECRET E2E_KEY}"
-    export E2E_SECRET='real:value/&' E2E_KEY=real-key
+    jig_build_values=()
+    for name in "${profile_build_secrets[@]}"; do
+      case "$name" in
+        E2E_SECRET) jig_build_values+=('real:$v/&<"x\1>') ;;
+        *) jig_build_values+=("real-$name-value") ;;
+      esac
+    done
     if jig_check_compose "$tmp/compose"; then
       printf 'ok|%s|%s' "${jig_build_services[*]-}" "${jig_compose_files[*]}"
     else
@@ -1212,6 +1222,19 @@ equals "a runtime secret that takes a build secret is refused" "$(inspect)" \
 fixture=runtime_config
 equals "a config that takes a build secret is refused" "$(inspect)" \
   "refused|the build secret E2E_KEY reaches the service db.1 as its runtime config c_key (the top-level config c_key takes environment: E2E_KEY): jig never passes a build secret into a container. Remove c_key from the service's configs; the build gets it under build: secrets:"
+fixture=value_go
+equals "a build secret's value in the config as compose writes it, \$ doubled and JSON-escaped, from an env_file for example, is refused" "$(inspect)" \
+  "refused|the value of the build secret E2E_SECRET is in the compose project that docker compose config resolves (an env_file or another variable holds it): jig never passes a build secret into a container. Remove the value from there; the build gets it from a top-level secret with environment: E2E_SECRET"
+fixture=value_json
+equals "a build secret's value in the config with only its backslash and quote escaped and a single \$ is refused" "$(inspect | cut -d'(' -f1)" \
+  "refused|the value of the build secret E2E_SECRET is in the compose project that docker compose config resolves "
+fixture=value_raw
+equals "a build secret's value as it is, in a label, is refused" "$(inspect | cut -d'(' -f1)" \
+  "refused|the value of the build secret E2E_KEY is in the compose project that docker compose config resolves "
+fixture=value_near
+equals "near misses of the values pass" "$(inspect | cut -d'|' -f1)" ok
+equals "a search that fails is refused" "$(grep() { return 2; } && inspect)" \
+  "refused|could not search docker compose config for the build secrets' values"
 fixture=no_app
 equals "a project without the app service is refused" "$(inspect)" "refused|docker compose config shows no service app"
 fixture=bad_name
