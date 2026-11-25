@@ -98,7 +98,7 @@ file on the host.
 | `model` | optional, once | The model the agent runs on, passed to Claude Code as `--model`: an alias such as `opus` or `sonnet[1m]`, or a full model name. Latin letters, digits, `.`, `_`, `:`, `@`, `/`, `[`, `]`, `-`, starting with a letter or digit, at most 100 characters. `JIG_MODEL` replaces it for one run. Without either, jig passes no `--model` and Claude Code's default applies. `jig smoke` checks the value and does not use it. |
 | `effort` | optional, once | The reasoning effort, passed to Claude Code as `--effort`: `low`, `medium`, `high`, `xhigh` or `max`. `JIG_EFFORT` replaces it for one run. Without either, jig passes no `--effort` and Claude Code's default applies. |
 | `deliver` | optional, once | How the branch is delivered: `pr` (the default) pushes it and opens a pull request, `branch` leaves it in your checkout with a report and pushes nothing (see [Branch delivery](#branch-delivery)). `jig smoke` checks the value and does not use it. |
-| `build-secret` | any number | The name of an environment variable whose value the image build needs, a token for a private package registry for example: capital latin letters, digits and `_`, not starting with a digit. Names jig sets or passes itself (`JIG_*`, `GIT_*`, the model credential's variables) and names jig, git and Docker rely on (`PATH`, `HOME`, `USER`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `BUILDX_*`, `DOCKER_*`, `COMPOSE_*`) are refused, and so is a name declared twice. See [Build secrets](#build-secrets). |
+| `build-secret` | any number | The name of an environment variable whose value the image build needs, a token for a private package registry for example: capital latin letters, digits and `_`, not starting with a digit. Names jig sets or passes itself (`JIG_*`, `GIT_*`, the model credential's variables), names jig, git and Docker rely on (`PATH`, `HOME`, `USER`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `BUILDX_*`, `DOCKER_*`, `COMPOSE_*`) and the variables bash sets or reads itself (`IFS`, `PWD`, `PS1`, `UID`, `BASH_*`, `TERM`, `_` and the other shell variables of the bash manual) are refused, and so is a name declared twice. See [Build secrets](#build-secrets). |
 
 An unknown key, a missing required key, a repeated `base`, `setup`, `verify`, `model`, `effort` or `deliver`, a
 `build-secret` name declared twice, or a value outside its character set stops jig with exit code 2 before anything runs; the message names the file and the line,
@@ -754,7 +754,7 @@ it was pushed).
 
 ## Tests
 
-`test/profile_test.sh` checks the `.jig/config` parser (`model`, `effort`, `deliver` and `build-secret` included), the protected-path matching, loading the
+`test/profile_test.sh` checks the `.jig/config` parser (`model`, `effort`, `deliver` and `build-secret` included, which refuses every variable a clean bash of the running version sets), the protected-path matching, loading the
 profile from a commit, the overlay's profile files (listed by git in an overlay repository, by the
 directory otherwise) and their validation, finding the base on a local bare `origin` (also from an
 overlay config, without writing `FETCH_HEAD`), building the profile from both layers, `JIG_BASE` in the profile's compose file, the

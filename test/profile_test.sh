@@ -239,8 +239,17 @@ for name in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY GIT_AUTHOR_NAME GIT_AUTHOR
   refused "build-secret $name is a name jig, git or Docker relies on" "$valid
 build-secret $name" "cfg:4: build-secret cannot be $name: jig sets or passes it itself (JIG_*, GIT_*, the model credential), or jig, git and Docker rely on it (PATH, HOME, USER, SHELL, TMPDIR, LANG, LC_*, BUILDX_*, DOCKER_*, COMPOSE_*), and jig removes a build secret from its environment once it has read it"
 done
+for name in _ BASH BASH_ENV BASH_XTRACEFD BASH_ BASHOPTS BASHPID SHELLOPTS IFS PWD OLDPWD PS0 PS1 PS4 UID EUID PPID OPTIND OPTARG \
+  RANDOM SRANDOM SECONDS LINENO HISTFILE HOSTNAME ENV CDPATH COMP_WORDBREAKS READLINE_LINE POSIXLY_CORRECT GLOBIGNORE TERM; do
+  refused "build-secret $name is one of bash's own variables" "$valid
+build-secret $name" "cfg:4: build-secret cannot be $name: bash, which jig runs in, sets or reads it itself (IFS, PWD, PS1, UID, BASH_*, TERM, _ and the other shell variables of the bash manual), and jig reads, removes and sets a build secret in its own environment"
+done
+equals "every variable that bash $BASH_VERSION sets on its own is refused" \
+  "$(env -i "$BASH" --norc --noprofile -c 'compgen -v' | while read -r name; do
+    jig_valid_build_secret "$name" && echo "$name"
+  done)" ""
 for name in CLAUDE_CODE_OAUTH_TOKEN_2 XJIG_TOKEN ANTHROPIC_API_KEYS MY_GIT_TOKEN PATHS HOMEBREW_GITHUB_API_TOKEN LANGUAGE \
-  XLC_TOKEN NPM_DOCKER_TOKEN COMPOSER_AUTH; do
+  XLC_TOKEN NPM_DOCKER_TOKEN COMPOSER_AUTH _TOKEN __ BASHFUL_TOKEN PS5 PS10 ENV_TOKEN IFS_TOKEN MY_PWD UIDS TERM_TOKEN; do
   parses "build-secret $name is no name of jig's" "$valid
 build-secret $name"
 done

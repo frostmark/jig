@@ -38,6 +38,12 @@ jig_valid_build_secret() {
   [[ $1 =~ $re ]] || return 1
   case "$1" in
     JIG_* | CLAUDE_CODE_OAUTH_TOKEN | ANTHROPIC_API_KEY | GIT_* | PATH | HOME | USER | SHELL | TMPDIR | LANG | LC_* | BUILDX_* | DOCKER_* | COMPOSE_*) return 2 ;;
+    _ | BASH | BASH_* | BASHOPTS | BASHPID | CDPATH | CHILD_MAX | COLUMNS | COMP_* | COMPREPLY | COPROC | DIRSTACK | EMACS | ENV | \
+      EPOCHREALTIME | EPOCHSECONDS | EUID | EXECIGNORE | FCEDIT | FIGNORE | FUNCNAME | FUNCNEST | GLOBIGNORE | GLOBSORT | GROUPS | \
+      HISTCMD | HISTCONTROL | HISTFILE | HISTFILESIZE | HISTIGNORE | HISTSIZE | HISTTIMEFORMAT | HOSTFILE | HOSTNAME | HOSTTYPE | \
+      IFS | IGNOREEOF | INPUTRC | INSIDE_EMACS | LINENO | LINES | MACHTYPE | MAIL | MAILCHECK | MAILPATH | MAPFILE | OLDPWD | \
+      OPTARG | OPTERR | OPTIND | OSTYPE | PIPESTATUS | POSIXLY_CORRECT | PPID | PROMPT_COMMAND | PROMPT_DIRTRIM | PS[0-4] | PWD | \
+      RANDOM | READLINE_* | REPLY | SECONDS | SHELLOPTS | SHLVL | SRANDOM | TERM | TIMEFORMAT | TMOUT | UID) return 3 ;;
   esac
 }
 
@@ -102,6 +108,7 @@ jig_parse_profile() {
         case "$status" in
           1) jig_fail "$label:$n: build-secret must be an environment variable name of capital latin letters, digits and _, not starting with a digit" ;;
           2) jig_fail "$label:$n: build-secret cannot be $value: jig sets or passes it itself (JIG_*, GIT_*, the model credential), or jig, git and Docker rely on it (PATH, HOME, USER, SHELL, TMPDIR, LANG, LC_*, BUILDX_*, DOCKER_*, COMPOSE_*), and jig removes a build secret from its environment once it has read it" ;;
+          3) jig_fail "$label:$n: build-secret cannot be $value: bash, which jig runs in, sets or reads it itself (IFS, PWD, PS1, UID, BASH_*, TERM, _ and the other shell variables of the bash manual), and jig reads, removes and sets a build secret in its own environment" ;;
         esac
         for i in ${profile_build_secrets[@]+"${!profile_build_secrets[@]}"}; do
           [ "${profile_build_secrets[i]}" != "$value" ] ||
