@@ -109,6 +109,31 @@ say "fake claude: the prompt names /jig/plan.md, the plan is read-only, JIG_BASE
 if grep -q -x NO-COMMIT /jig/plan.md; then
   printf 'The plan asks for nothing.\n' >JIG_BLOCKED.md
   result "Nothing to do."
+elif grep -q -x GITHUB /jig/plan.md; then
+  mkdir -p .github/workflows
+  echo 'on: push' >.github/workflows/ci.yml
+  echo ok >health.txt
+  git add .github health.txt
+  git commit -q -m "Add a workflow and health.txt"
+  result "What changes: a workflow and health.txt."
+elif grep -q -x GITHUB-REVERT /jig/plan.md; then
+  mkdir -p .github/workflows
+  echo 'on: push' >.github/workflows/ci.yml
+  git add .github
+  git commit -q -m "Add a workflow"
+  git rm -q -r .github
+  git commit -q -m "Remove the workflow"
+  echo ok >health.txt
+  git add health.txt
+  git commit -q -m "Add health.txt"
+  : >left-behind.txt
+  result "What changes: health.txt says ok."
+elif grep -q -x LEAK-STATUS /jig/plan.md; then
+  echo ok >health.txt
+  git add health.txt
+  git commit -q -m "Add health.txt"
+  : >"$CLAUDE_CODE_OAUTH_TOKEN.txt"
+  result "What changes: health.txt says ok."
 elif grep -q -x OVERSIZED /jig/plan.md; then
   printf '%10000s' '' | tr ' ' '\n' >JIG_BLOCKED.md
   long="$(printf '%240s' '' | tr ' ' x)"
@@ -174,6 +199,7 @@ fi
 cat >"$tmp/bin/gh" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$FAKE_GH_DIR/calls"
+[ -z "${FAKE_GH_FORBID:-}" ] || { echo "fake gh: called with deliver branch: $*" >&2; exit 1; }
 case "$1 $2" in
   "auth status") exit 0 ;;
   "repo view") echo acme/shop; exit 0 ;;
@@ -475,6 +501,13 @@ grep -q -F "jig: the CLAUDE_CODE_OAUTH_TOKEN value was found in: plan.md (branch
 lacks "the cut PR body itself never had the credential" "$runs/late-token/pr-body.md" "[REDACTED]"
 nothing_pushed late-token
 
+printf '# Add a workflow\n\nGITHUB\n' >"$tmp/plans/github-pr.md"
+jig run "$tmp/plans/github-pr.md"
+equals "pr delivery of a branch that changes .github/ exits 3" "$?" 3
+has_line "pr delivery refuses a branch that changes .github/" "$tmp/err" \
+  "jig: jig/github-pr changes paths under .github/ (see $runs/github-pr/branch.patch): a pushed workflow runs with the repository's secrets and write access. Nothing was pushed; the local branch jig/github-pr was deleted."
+nothing_pushed github-pr
+
 mkdir -p "$JIG_PROFILES/acme/shop"
 printf 'base main\nsetup .jig/setup\nverify .jig/verify\nmodel opus\neffort high\n' >"$JIG_PROFILES/acme/shop/config"
 printf '# Use the settings\n\nIssue: ABC-123\n\nTWO-MODELS\n' >"$tmp/plans/settings.md"
@@ -492,6 +525,122 @@ equals "another tracker's reference opens the PR body as is" "$(sed -n 1,4p "$tm
 
 - .jig/verify: green
 - Agent: exit 0, $fake_meta, $models_text"
+
+printf 'base main\nsetup .jig/setup\nverify .jig/verify\ndeliver branch\n' >"$JIG_PROFILES/acme/shop/config"
+export FAKE_GH_FORBID=1
+rm -f "$tmp/gh/calls"
+
+handed_over() {
+  local slug="$1" commits="$2" files="$3"
+  equals "$slug: the branch is in the target checkout" "$(git -C "$target" rev-list --count "main..jig/$slug")" "$commits"
+  equals "$slug: the branch changes only the agent's files" "$(git -C "$target" diff --name-only main "jig/$slug")" "$files"
+  equals "$slug: no branch on origin" "$(git -C "$origin" for-each-ref --format='%(refname)' "refs/heads/jig/$slug")" ""
+  equals "$slug: the target checkout stays on main with a clean worktree and index" \
+    "$(git -C "$target" symbolic-ref --short HEAD) $(git -C "$target" status --porcelain)" "main "
+  checks=$(( checks + 1 ))
+  [ ! -e "$runs/$slug/pr-body.md" ] || fail "$slug: a PR description was written"
+}
+
+no_gh() {
+  checks=$(( checks + 1 ))
+  [ ! -e "$tmp/gh/calls" ] || fail "$1: gh ran with deliver branch: $(cat "$tmp/gh/calls")"
+}
+
+attention_items() {
+  sed -n '/^## Needs attention$/,/^## Profile$/p' "$1" | sed '1,2d;$d'
+}
+
+printf '# Add a health file\n\nIssue: #12\n\nWrite ok to health.txt.\n' >"$tmp/plans/branch-health.md"
+jig run "$tmp/plans/branch-health.md"
+equals "a clean branch run exits 0" "$?" 0
+handed_over branch-health 1 health.txt
+no_gh "a clean branch run"
+has_line "branch delivery tells the agent that jig hands the branch over" "$runs/branch-health/system-prompt.md" \
+  "- Commit on the current branch, in small commits. Do not push: jig hands the branch to the owner."
+report="$runs/branch-health/report.md"
+equals "the report starts with the issue, the repository, the branch, the base, verify and the agent" \
+  "$(sed -n 1,7p "$report")" "Fixes #12
+
+- Repository: $target
+- Branch: jig/branch-health (1 commit)
+- Base: main at $base
+- .jig/verify: green
+- Agent: exit 0, $fake_meta, model: claude-fake-1 (default), effort: default"
+checks=$(( checks + 1 ))
+sed -n 8p "$report" | grep -q -x -e '- Duration: [0-9]*m [0-9]*s in total, agent [0-9]*m [0-9]*s (limit 60 min)' ||
+  fail "the report's duration line: $(sed -n 8p "$report")"
+equals "the report names the log and the plan copy with host paths, and the commands to read the branch" \
+  "$(sed -n 9,15p "$report")" "- Log: \`$runs/branch-health/claude.log\`
+- Plan: \`$runs/branch-health/plan.md\`
+
+\`\`\`sh
+git -C $target log --oneline $base..jig/branch-health
+git -C $target diff $base...jig/branch-health
+\`\`\`"
+equals "the commands in the report show the agent's commit and its diff" \
+  "$(sed -n 13,14p "$report" | while IFS= read -r command; do eval "$command --format=%s --stat=80" 2>&1 | sed -n 1p; done)" \
+  "Add health.txt
+ health.txt | 1 +"
+lacks "a clean report needs no attention" "$report" "## Needs attention"
+equals "the report ends with the profile, the harness and the agent's summary, without the plan or an attribution" \
+  "$(sed -n '/^## Profile$/,$p' "$report" | grep -e '^## ' -e '^What changes')" "## Profile
+## Harness
+## Agent summary
+What changes: health.txt says ok."
+for text in "<details>" "Write ok to health.txt." "Generated with" '$JIG_HOME'; do
+  lacks "the report has no $text" "$report" "$text"
+done
+equals "the terminal ends with the result, verify, the report and the diff command" "$(tail -n 4 "$tmp/out")" \
+  "jig: ready: jig/branch-health in $target
+jig: .jig/verify: green
+jig: report: $report
+jig: diff: git -C $target diff $base...jig/branch-health"
+
+printf '# Add a workflow\n\nGITHUB\n' >"$tmp/plans/branch-github.md"
+jig run "$tmp/plans/branch-github.md"
+equals "a branch run that changes .github/ exits 1" "$?" 1
+handed_over branch-github 1 ".github/workflows/ci.yml
+health.txt"
+no_gh "a branch run with .github/"
+equals "the .github/ change is the first item that needs attention" "$(attention_items "$runs/branch-github/report.md")" \
+  "- Changes under \`.github/\`, in a commit or in the diff against main: a pushed workflow runs with the repository's secrets and write access, so review them before you push:
+  - \`.github/workflows/ci.yml\`"
+has_line "the terminal names .github/ as the reason" "$tmp/out" "jig: needs attention (.github/): jig/branch-github in $target"
+
+printf '# Add and remove a workflow\n\nGITHUB-REVERT\n' >"$tmp/plans/branch-revert.md"
+jig run "$tmp/plans/branch-revert.md"
+equals "a branch run that changes .github/ and reverts it exits 1" "$?" 1
+handed_over branch-revert 3 health.txt
+no_gh "a branch run with a reverted .github/ change"
+equals "the reverted .github/ change comes first, before the uncommitted changes" \
+  "$(attention_items "$runs/branch-revert/report.md")" \
+  "- Changes under \`.github/\`, in a commit or in the diff against main: a pushed workflow runs with the repository's secrets and write access, so review them before you push:
+  - \`.github/workflows/ci.yml\` (changed, then reverted within the branch)
+- Uncommitted changes were left in the clone; they are not on the branch and .jig/verify ran without them:
+
+\`\`\`
+?? left-behind.txt
+\`\`\`"
+has_line "the terminal names both reasons, .github/ first" "$tmp/out" \
+  "jig: needs attention (.github/; uncommitted changes): jig/branch-revert in $target"
+
+printf '# Do nothing\n\nNO-COMMIT\n' >"$tmp/plans/branch-nothing.md"
+jig run "$tmp/plans/branch-nothing.md"
+equals "a branch run without commits exits 3" "$?" 3
+has_line "a branch run without commits says no branch was fetched" "$tmp/err" \
+  "jig: the agent made no commits on jig/branch-nothing (agent exit 0): no branch was fetched into $target."
+nothing_pushed branch-nothing
+no_gh "a branch run without commits"
+
+printf '# Leave the credential\n\nLEAK-STATUS\n' >"$tmp/plans/branch-leak.md"
+jig run "$tmp/plans/branch-leak.md"
+equals "a branch run whose report would carry the credential exits 3" "$?" 3
+checks=$(( checks + 1 ))
+grep -q -F "jig: the CLAUDE_CODE_OAUTH_TOKEN value was found in: report.md (branch.bundle was removed" "$tmp/err" ||
+  fail "the credential in an uncommitted file name is found in the report: $(cat "$tmp/err")"
+nothing_pushed branch-leak
+no_gh "a branch run with the credential"
+has_line "the report is redacted in the run directory" "$runs/branch-leak/report.md" "?? [REDACTED].txt"
 
 checks=$(( checks + 1 ))
 [ -z "$(leftovers)" ] || fail "compose projects left: $(leftovers | sort -u | tr '\n' ' ')"
