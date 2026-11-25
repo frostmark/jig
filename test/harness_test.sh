@@ -834,5 +834,99 @@ equals "the report names the repository, the branch with its commits and the bas
 equals "one commit is singular" "$(jig_report_branch /home/dev/shop jig/x 1 develop 0123abcd | sed -n 2p)" \
   "- Branch: jig/x (1 commit)"
 
+mkdir "$tmp/secrets"
+equals "without secrets nothing is found" "$(jig_contains_secret "$root/README.md"; echo "$?")" 1
+equals "without secrets the stream passes as is" "$(printf 'a e2e0dummy0token b\n' | jig_redact_stream)" "a e2e0dummy0token b"
+secret='acme:ghp_e2e/x&y.*[a]^$\1'
+jig_add_secret CLAUDE_CODE_OAUTH_TOKEN e2e0dummy0token
+jig_add_secret NPM_TOKEN "$secret"
+near='near acme:ghp_e2e/x&y.*[a]^$\2 and acme:ghp_e2e/x&yQ[a]^$\1 and acme:ghp_e2e/x&y.*a^$\1'
+printf 'token e2e0dummy0token here\nnpm %s and %s\nplain line\n%s\n' "$secret" "$secret" "$near" >"$tmp/secrets/log"
+redacted="token [REDACTED] here
+npm [REDACTED] and [REDACTED]
+plain line
+$near"
+printf '%s\n' "$near" >"$tmp/secrets/near"
+printf 'only %s\n' "$secret" >"$tmp/secrets/npm"
+equals "a value with : / & and regex characters is found as a fixed string" "$(jig_contains_secret "$tmp/secrets/npm"; echo "$?")" 0
+equals "near misses of the value are not found" "$(jig_contains_secret "$tmp/secrets/near"; echo "$?")" 1
+equals "an unreadable file is no clean file" "$(jig_contains_secret "$tmp/secrets/missing" 2>/dev/null; echo "$?")" 2
+equals "the names of the values in a file, in the order they were added" "$(jig_secrets_in "$tmp/secrets/log")" \
+  "CLAUDE_CODE_OAUTH_TOKEN
+NPM_TOKEN"
+equals "only the names of the values in the file" "$(jig_secrets_in "$tmp/secrets/npm")" NPM_TOKEN
+equals "no name for near misses" "$(jig_secrets_in "$tmp/secrets/near")" ""
+equals "one value was found" "$(jig_values_found NPM_TOKEN)" "the NPM_TOKEN value was"
+equals "two values were found, named in the order they were added" "$(jig_values_found "NPM_TOKEN
+CLAUDE_CODE_OAUTH_TOKEN
+NPM_TOKEN")" "the CLAUDE_CODE_OAUTH_TOKEN and NPM_TOKEN values were"
+equals "three values are listed with commas" \
+  "$(jig_add_secret DEPLOY_KEY x && jig_values_found "$(jig_all_secrets)")" \
+  "the CLAUDE_CODE_OAUTH_TOKEN, NPM_TOKEN and DEPLOY_KEY values were"
+equals "all values by name" "$(jig_values_of "$(jig_all_secrets)")" "the CLAUDE_CODE_OAUTH_TOKEN and NPM_TOKEN values"
+cp "$tmp/secrets/log" "$tmp/secrets/log-file"
+jig_redact_file "$tmp/secrets/log-file"
+equals "a file is redacted value by value as fixed strings" "$(cat "$tmp/secrets/log-file")" "$redacted"
+equals "a stream is redacted the same way" "$(jig_redact_stream <"$tmp/secrets/log")" "$redacted"
+rm -f "$tmp/secrets/read"
+equals "a stream is redacted line by line as it comes" \
+  "$( { printf 'first %s\n' "$secret"
+      for n in $(seq 1 50); do [ -e "$tmp/secrets/read" ] && break; sleep 0.1; done
+      if [ -e "$tmp/secrets/read" ]; then echo second; else echo "held back"; fi
+    } | jig_redact_stream | { IFS= read -r line; : >"$tmp/secrets/read"; printf '%s|' "$line"; cat; })" \
+  "first [REDACTED]|second"
+equals "a text is redacted as fixed strings" "$(jig_redact_text "model $secret and e2e0dummy0token, not $near")" \
+  "model [REDACTED] and [REDACTED], not $near"
+equals "glob characters in a value match only themselves" \
+  "$(jig_secret_values=('[a]*?' '\') && jig_redact_text 'a aXY [a]*? \ b')" "a aXY [REDACTED] [REDACTED] b"
+printf '%s\n' '{"msg":"say a\"b\\c/&"}' 'raw a"b\c/&' 'other a\"b\c' >"$tmp/secrets/json"
+equals "a value with a backslash or a quote is also looked for as JSON writes it, under the same name" \
+  "$( (jig_secret_names=() && jig_secret_values=() && jig_add_secret QUOTED 'a"b\c/&' && jig_add_secret PLAIN 'a/&' &&
+    printf '%s\n' "${jig_secret_names[@]}" "${jig_secret_values[@]}" "$(jig_values_found "$(jig_all_secrets)")" &&
+    jig_redact_file "$tmp/secrets/json" && cat "$tmp/secrets/json") 2>&1)" \
+  'QUOTED
+QUOTED
+PLAIN
+a"b\c/&
+a\"b\\c/&
+a/&
+the QUOTED and PLAIN values were
+{"msg":"say [REDACTED]"}
+raw [REDACTED]
+other a\"b\c'
+printf '1 xabcx 2 abc 3\n' >"$tmp/secrets/overlap"
+equals "the longer of two overlapping values is replaced first" \
+  "$(jig_secret_values=(abc xabcx) && jig_redact_file "$tmp/secrets/overlap" && cat "$tmp/secrets/overlap")" \
+  "1 [REDACTED] 2 [REDACTED] 3"
+mkdir "$tmp/secrets/run"
+printf 'a e2e0dummy0token\n' >"$tmp/secrets/run/a.log"
+printf 'b %s\n' "$secret" >"$tmp/secrets/run/b.log"
+printf 'c clean\n' >"$tmp/secrets/run/c.log"
+printf 'd e2e0dummy0token\n' >"$tmp/secrets/run/d.log"
+equals "redacted files are named with the values found in them" \
+  "$(jig_redact_files "$tmp/secrets/run" a.log b.log c.log 2>&1)" \
+  "jig: WARNING: the CLAUDE_CODE_OAUTH_TOKEN and NPM_TOKEN values were found in a.log b.log and replaced with [REDACTED] in $tmp/secrets/run"
+equals "the redacted files keep the rest" "$(cat "$tmp/secrets/run/a.log" "$tmp/secrets/run/b.log" "$tmp/secrets/run/c.log")" \
+  "a [REDACTED]
+b [REDACTED]
+c clean"
+equals "a file that cannot be redacted is removed and named" \
+  "$( (jig_redact_file() { return 1; } && jig_redact_files "$tmp/secrets/run" d.log c.log) 2>&1; ls "$tmp/secrets/run")" \
+  "jig: WARNING: the CLAUDE_CODE_OAUTH_TOKEN value was found in d.log, which could not be redacted and were removed from $tmp/secrets/run
+a.log
+b.log
+c.log"
+equals "a file that cannot be scanned is named with every value" \
+  "$(jig_redact_files "$tmp/secrets/run" missing.log 2>&1 | grep '^jig:')" \
+  "jig: WARNING: could not scan $tmp/secrets/run/missing.log for the CLAUDE_CODE_OAUTH_TOKEN and NPM_TOKEN values"
+equals "without secrets no file is touched" \
+  "$( (jig_secret_names=() && jig_secret_values=() && jig_redact_files "$tmp/secrets" log) 2>&1; cat "$tmp/secrets/log")" \
+  "token e2e0dummy0token here
+npm $secret and $secret
+plain line
+$near"
+jig_secret_names=()
+jig_secret_values=()
+
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]

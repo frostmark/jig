@@ -32,6 +32,7 @@ fi
 cred_value="${!cred_name}"
 [[ $cred_value =~ ^[A-Za-z0-9_-]+$ ]] ||
   jig_fail "the $cred_name value may contain only latin letters, digits, _ and -: check that it was copied whole"
+jig_add_secret "$cred_name" "$cred_value"
 unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY
 
 jig_check_host
@@ -96,53 +97,31 @@ refuse() {
   die "$* Nothing was pushed; $kept."
 }
 
-contains_cred() {
-  grep -a -F -q -f <(printf '%s\n' "$cred_value") "$1"
-}
-
 refuse_leaks() {
-  local f found leaks=""
+  local f found leaks="" names=""
   for f in "$@"; do
     found=0
-    contains_cred "$run/$f" || found=$?
+    jig_contains_secret "$run/$f" || found=$?
     case "$found" in
-      0) leaks="$leaks $f" ;;
+      0)
+        leaks="$leaks $f"
+        names="$names$(jig_secrets_in "$run/$f")"$'\n' ;;
       1) ;;
-      *) die "could not scan $run/$f for the $cred_name value" ;;
+      *) die "could not scan $run/$f for $(jig_values_of "$(jig_all_secrets)")" ;;
     esac
   done
   [ -n "$leaks" ] || return 0
   rm -f "$run/branch.bundle"
-  refuse "the $cred_name value was found in:$leaks (branch.bundle was removed; the warnings below say what happened to the other files in $run)."
-}
-
-# The value matches ^[A-Za-z0-9_-]+$ (checked above), so it is safe as a sed pattern.
-redact() {
-  local f="$1"
-  LC_ALL=C sed -f <(printf 's/%s/[REDACTED]/g\n' "$cred_value") "$f" >"$f.redacted" && mv -f "$f.redacted" "$f"
+  refuse "$(jig_values_found "$names") found in:$leaks (branch.bundle was removed; the warnings below say what happened to the other files in $run)."
 }
 
 redact_logs() {
-  local f status redacted="" removed=""
+  local f files=()
   for f in "$run"/*; do
     [ -f "$f" ] && [ ! -L "$f" ] && [ "$f" != "$run/branch.bundle" ] || continue
-    status=0
-    contains_cred "$f" || status=$?
-    case "$status" in
-      0) if redact "$f" && { contains_cred "$f"; [ "$?" = 1 ]; }; then
-           redacted="$redacted ${f##*/}"
-         else
-           rm -f "$f" "$f.redacted"
-           removed="$removed ${f##*/}"
-         fi ;;
-      1) ;;
-      *) echo "$jig_name: WARNING: could not scan $f for the $cred_name value" >&2 ;;
-    esac
+    files+=("${f##*/}")
   done
-  [ -z "$redacted" ] ||
-    echo "$jig_name: WARNING: the $cred_name value was found in$redacted and replaced with [REDACTED] in $run" >&2
-  [ -z "$removed" ] ||
-    echo "$jig_name: WARNING: the $cred_name value was found in$removed, which could not be redacted and were removed from $run" >&2
+  jig_redact_files "$run" ${files[@]+"${files[@]}"}
 }
 
 teardown() {
@@ -266,7 +245,7 @@ agent_log="$(jig_compose exec -T app node -e "$extract_js" meta <"$run/claude.lo
 [ "$extract_status" != 130 ] || exit 130
 [ "$extract_status" = 0 ] || agent_log=""
 agent_report="$(jig_agent_report "$agent_log")"
-echo "$jig_name: agent: ${agent_report//"$cred_value"/[REDACTED]}"
+echo "$jig_name: agent: $(jig_redact_text "$agent_report")"
 
 teardown || die "docker compose down failed: remove project $jig_project by hand"
 [ "$jig_interrupted" = 0 ] || exit 130
