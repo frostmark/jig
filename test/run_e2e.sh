@@ -578,8 +578,10 @@ fetch_head_kept branch-health
 has_line "branch delivery tells the agent that jig hands the branch over" "$runs/branch-health/system-prompt.md" \
   "- Commit on the current branch, in small commits. Do not push: jig hands the branch to the owner."
 report="$runs/branch-health/report.md"
-equals "the report starts with the issue, the repository, the branch, the base, verify and the agent" \
-  "$(sed -n 1,7p "$report")" "Fixes #12
+equals "the report starts with the plan's title, the issue, the repository, the branch, the base, verify and the agent" \
+  "$(sed -n 1,9p "$report")" "# Add a health file
+
+Fixes #12
 
 - Repository: $target
 - Branch: jig/branch-health (1 commit)
@@ -587,10 +589,10 @@ equals "the report starts with the issue, the repository, the branch, the base, 
 - .jig/verify: green
 - Agent: exit 0, $fake_meta, model: claude-fake-1 (default), effort: default"
 checks=$(( checks + 1 ))
-sed -n 8p "$report" | grep -q -x -e '- Duration: [0-9]*m [0-9]*s in total, agent [0-9]*m [0-9]*s (limit 60 min)' ||
-  fail "the report's duration line: $(sed -n 8p "$report")"
+sed -n 10p "$report" | grep -q -x -e '- Duration: [0-9]*m [0-9]*s in total, agent [0-9]*m [0-9]*s (limit 60 min)' ||
+  fail "the report's duration line: $(sed -n 10p "$report")"
 equals "the report names the log and the plan copy with host paths, and the commands to read the branch" \
-  "$(sed -n 9,15p "$report")" "- Log: \`$runs/branch-health/claude.log\`
+  "$(sed -n 11,17p "$report")" "- Log: \`$runs/branch-health/claude.log\`
 - Plan: \`$runs/branch-health/plan.md\`
 
 \`\`\`sh
@@ -598,7 +600,7 @@ git -C $target log --oneline $base..jig/branch-health
 git -C $target diff $base...jig/branch-health
 \`\`\`"
 equals "the commands in the report show the agent's commit and its diff" \
-  "$(sed -n 13,14p "$report" | while IFS= read -r command; do eval "$command --format=%s --stat=80" 2>&1 | sed -n 1p; done)" \
+  "$(sed -n 15,16p "$report" | while IFS= read -r command; do eval "$command --format=%s --stat=80" 2>&1 | sed -n 1p; done)" \
   "Add health.txt
  health.txt | 1 +"
 lacks "a clean report needs no attention" "$report" "## Needs attention"

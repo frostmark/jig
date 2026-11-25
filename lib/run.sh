@@ -427,6 +427,10 @@ agent_text="exit $agent_status, $agent_report"
 top_name="PR description"
 [ "$profile_deliver" = pr ] || top_name=report
 top="$(
+  if [ "$profile_deliver" = branch ]; then
+    echo "# $title"
+    echo
+  fi
   if [ -n "$issue_line" ]; then
     echo "$issue_line"
     echo

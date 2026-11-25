@@ -502,14 +502,23 @@ With `deliver branch` in the profile's config, jig fetches `jig/<slug>` into the
 leaves the machine. The checks for an existing `jig/<slug>`, local or on `origin`, stay, so your push later
 cannot collide. Review the branch and push it yourself.
 
-`report.md` in the run directory takes the place of the PR description. It has the same parts, with host
-paths, since it stays on your machine: the plan's issue line (`Fixes #123` or `Issue: ABC-123`), then the
-repository's path, the branch with its number of commits, the base branch and commit, `verify`, the agent,
-the duration, the paths of `claude.log` and of the plan's copy (not the plan text), the commands to read
-the branch, then "Needs attention", "Profile", "Harness" and the agent's final message. There is no
-attribution line.
+`report.md` in the run directory takes the place of the PR description. It starts with the plan's title
+as a heading (the PR title with `deliver pr`), then has the same parts: the plan's issue line
+(`Fixes #123` or `Issue: ABC-123`), then the repository's path, the branch with its number of commits, the
+base branch and commit, `verify`, the agent, the duration, the paths of `claude.log` and of the plan's copy
+(not the plan text), the commands to read the branch, then "Needs attention", "Profile", "Harness" and the
+agent's final message. There is no attribution line.
+
+The report stays on your machine, so it uses host paths where the PR description writes
+`$JIG_HOME/runs/...`: the repository in its lines and commands, and the run directory's files it names
+(`claude.log`, `plan.md`, and `verify.log`, `summary.md`, `blocked-branch.md` or `blocked-worktree.md`
+when an item points at them). The "Profile" and "Harness" sections are the PR's: the overlay's files as
+`$JIG_PROFILES/<owner>/<repo>/...` and the engine rules as `jig's lib/rules.md`; the terminal printed
+their host paths at launch.
 
 ````markdown
+# Add a health check
+
 Fixes #12
 
 - Repository: /home/you/src/shop
