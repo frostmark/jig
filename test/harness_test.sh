@@ -765,5 +765,28 @@ equals "the word issue in prose, a heading or a plural label is no Issue line" \
   "$(unread '# Title\n\nIssue: #12\n\nThis fixes the issue where it fails.\n\nKnown issues: none.\n\nReissue: the token is renewed.\n\n## Issue: notes\n\n# Issue: another title\n')" \
   "Fixes #12|"
 
+for word in /home/dev/src/shop /srv/a_b.c-d/e=f:g@h%i+j,k; do
+  equals "a plain path is a shell word as is: $word" "$(jig_shell_word "$word")" "$word"
+done
+for word in "/home/dev/my shop" "/srv/it's" "/srv/'a'b''" '/srv/$(id)' '/srv/a;b' '/srv/`id`' '/srv/~a' '/srv/a*' '/srv/a"b' \
+  '/srv/a\b' "/srv/new
+line" ''; do
+  checks=$(( checks + 1 ))
+  quoted="$(jig_shell_word "$word")"
+  [ "$(eval "printf '%s' $quoted")" = "$word" ] && [[ $quoted == \'*\' ]] ||
+    fail "a path with shell characters is one quoted shell word: $word -> $quoted"
+done
+equals "a quote in a path is closed, escaped and reopened" "$(jig_shell_word "/srv/it's")" "'/srv/it'\\''s'"
+equals "the commands name the repository, the base commit and the branch" \
+  "$(jig_branch_commands "/home/dev/my shop" 0123abcd jig/add-health)" \
+  "git -C '/home/dev/my shop' log --oneline 0123abcd..jig/add-health
+git -C '/home/dev/my shop' diff 0123abcd...jig/add-health"
+equals "the report names the repository, the branch with its commits and the base" \
+  "$(jig_report_branch /home/dev/shop jig/add-health 2 main 0123abcd)" "- Repository: /home/dev/shop
+- Branch: jig/add-health (2 commits)
+- Base: main at 0123abcd"
+equals "one commit is singular" "$(jig_report_branch /home/dev/shop jig/x 1 develop 0123abcd | sed -n 2p)" \
+  "- Branch: jig/x (1 commit)"
+
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]
