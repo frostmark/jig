@@ -328,6 +328,7 @@ fi
 
 title="$(sed -n 's/^# //p' "$run/plan.md" | sed -n 1p)" || die "could not read the title of $run/plan.md"
 [ -n "$title" ] || title="$slug"
+issue_line="$(jig_pr_issue "$run/plan.md")" || die "could not read the Issue line of $run/plan.md"
 
 reasons=""
 attention=""
@@ -385,6 +386,10 @@ agent_text="exit $agent_status, $agent_report"
 
 body="$run/pr-body.md"
 pr_top="$(
+  if [ -n "$issue_line" ]; then
+    echo "$issue_line"
+    echo
+  fi
   echo "- $profile_verify: $verify_text"
   echo "- Agent: $agent_text"
   echo "- Duration: $(elapsed "$started") in total, agent $agent_duration (limit $minutes min)"

@@ -523,5 +523,32 @@ equals "the attribution follows the cut plan" "$(tail -n 3 "$tmp/run/pr-body.md"
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 
+issue() {
+  printf "$1" >"$tmp/run/issue.md"
+  jig_pr_issue "$tmp/run/issue.md" 2>&1
+}
+equals "an issue of the repository becomes Fixes" "$(issue '# Add a health check\n\nIssue: #12\n\nWhy.\n')" "Fixes #12"
+equals "the Issue line right under the title, without a blank line" "$(issue '# Title\nIssue: #12\n')" "Fixes #12"
+equals "blanks around the reference are dropped" "$(issue '# Title\n\nIssue:\t #12 \t\n')" "Fixes #12"
+equals "a plan with CRLF line ends" "$(issue '# Title\r\n\r\nIssue: #12\r\n\r\nWhy.\r\n')" "Fixes #12"
+equals "another tracker's ID is passed through" "$(issue '# Title\n\nIssue: ABC-123\n')" "Issue: ABC-123"
+equals "a number with letters is passed through" "$(issue '# Title\n\nIssue: #12a\n')" "Issue: #12a"
+equals "a number with a leading zero is passed through" "$(issue '# Title\n\nIssue: #012\n')" "Issue: #012"
+equals "issue zero is passed through" "$(issue '# Title\n\nIssue: #0\n')" "Issue: #0"
+equals "a bare # is passed through" "$(issue '# Title\n\nIssue: #\n')" "Issue: #"
+equals "two numbers are passed through" "$(issue '# Title\n\nIssue: #12 #13\n')" "Issue: #12 #13"
+equals "another repository's issue is passed through" "$(issue '# Title\n\nIssue: acme/web#12\n')" "Issue: acme/web#12"
+equals "a passed-through reference is printable" "$(issue '# Title\n\nIssue: ABC-1`id`\001\n')" "Issue: ABC-1?id??"
+equals "a passed-through reference is cut to 200 bytes" "$(issue "# Title\n\nIssue: $(fill 250 x)\n" | bytes)" 207
+equals "no Issue line" "$(issue '# Title\n\nWhy.\n\n## Links\n\n- #12\n')" ""
+equals "an empty Issue line" "$(issue '# Title\n\nIssue: \t\n\nWhy.\n')" ""
+equals "an Issue line after the first paragraph is not read" "$(issue '# Title\n\nWhy.\n\nIssue: #12\n')" ""
+equals "an Issue line before the title is not read" "$(issue 'Issue: #12\n# Title\n')" ""
+equals "an Issue line under a later heading is not read" "$(issue '# Title\n\nWhy.\n\n# Second\n\nIssue: #12\n')" ""
+equals "an Issue line under a second-level heading is not read" "$(issue '## Notes\n\nIssue: #12\n')" ""
+equals "a plan without a heading has no Issue line" "$(issue 'Issue: #12\n')" ""
+equals "a lowercase issue line is not read" "$(issue '# Title\n\nissue: #12\n')" ""
+equals "an Issue word without a colon is not read" "$(issue '# Title\n\nIssues #12\n')" ""
+
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]
