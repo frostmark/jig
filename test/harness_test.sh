@@ -271,7 +271,7 @@ claude-fake-1
 0")" "$kept, model: claude-fake-1 (default), effort: default"
 done
 for dropped in "success"$'\e]0;title\a' $'\e[2Jsuccess, turns: 3' '**success**, turns: 3' 'success, turns: 3 [x](y)' \
-  'Success, turns: 3' "$(fill 41 a), turns: 3" 'success, turns: 1234567' 'success, turns: -1' \
+  'Success, turns: 3' "$(fill 41 a), turns: 3" "error ($(fill 41 a)), turns: 3" 'success, turns: 1234567' 'success, turns: -1' \
   'success, estimated cost $1234567.00' 'success, estimated cost $0.1' 'turns: 3, success' 'success, ' ', turns: 3'; do
   equals "an outcome, turns and cost in another shape are dropped: $(printable "$dropped")" "$(report "" "" unset "$dropped
 claude-fake-1
@@ -629,11 +629,17 @@ equals "a lowercase issue line is not read" "$(unread '# Title\n\nissue: #12\n')
 equals "an indented Issue line is not read" "$(unread '# Title\n\n  Issue: #12\n')" "|$(warning 3 '  Issue: #12')"
 equals "a bold Issue line is not read" "$(unread '# Title\n\nWhy.\n\n**Issue:** #5\n')" "|$(warning 5 '**Issue:** #5')"
 equals "an Issue word without a colon is not read" "$(unread '# Title\n\nIssue #12\n')" "|$(warning 3 'Issue #12')"
+equals "an indented Issue word without a colon is not read" "$(unread '# Title\n\nWhy.\n\n  Issue #12\n')" \
+  "|$(warning 5 '  Issue #12')"
+equals "a bold Issue word without a colon is not read" "$(unread '# Title\n\nWhy.\n\n**Issue** #5\n')" \
+  "|$(warning 5 '**Issue** #5')"
 equals "a longer word that starts with Issue is not read" "$(unread '# Title\n\nIssues: #12\n')" "|$(warning 3 'Issues: #12')"
 equals "a sentence that mentions an Issue line is not read" "$(unread '# Title\n\nSee Issue: #12\n')" \
   "|$(warning 3 'See Issue: #12')"
 equals "a list item with an Issue label is not read" "$(unread '# Title\n\nWhy.\n\n- _issue_: #12\n')" \
   "|$(warning 5 '- _issue_: #12')"
+equals "a tracker key that starts with issue is no line that is not read" "$(unread '# Title\n\nIssue: ISSUE-7\n')" \
+  "Issue: ISSUE-7|"
 equals "a second Issue line is not read" "$(unread '# Title\n\nIssue: #12\n\nIssue: #13\n')" "Fixes #12|$(warning 5 'Issue: #13')"
 equals "each line that is not read is named" "$(unread 'issue: #1\n# Title\n\nWhy.\n\nIssue: #12\n')" \
   "|$(warning 1 'issue: #1')
@@ -643,7 +649,7 @@ equals "a line that is not read is named without its CR" "$(unread '# Title\r\n\
 equals "a line that is not read is named in 200 printable bytes" \
   "$(unread "# Title\n\nWhy.\n\nIssue: \`$(fill 250 x)\n")" "|$(warning 5 "Issue: ?$(fill 189 x)...")"
 equals "the word issue in prose, a heading or a plural label is no Issue line" \
-  "$(unread '# Title\n\nIssue: #12\n\nThis fixes the issue where it fails.\n\nKnown issues: none.\n\n## Issue: notes\n\n# Issue: another title\n')" \
+  "$(unread '# Title\n\nIssue: #12\n\nThis fixes the issue where it fails.\n\nKnown issues: none.\n\nReissue: the token is renewed.\n\n## Issue: notes\n\n# Issue: another title\n')" \
   "Fixes #12|"
 
 echo "$checks checks, $failures failed"
