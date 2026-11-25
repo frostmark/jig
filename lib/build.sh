@@ -132,6 +132,7 @@ jig_write_build_compose() {
     echo "services:"
     for service in "${jig_build_services[@]}"; do
       echo "  \"$service\":"
+      echo "    pull_policy: never"
       case "$named" in
         *$'\n'"$service"$'\n'*) ;;
         *) echo "    image: \"$(jig_image_name "$service")\"" ;;

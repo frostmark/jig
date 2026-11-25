@@ -987,6 +987,16 @@ checks=$(( checks + 1 ))
 [ -n "$(image_id "$unnamed")" ] && [ "$(image_id "$unnamed")" != "$unnamed_old" ] || fail "the second smoke builds a new image under the same name"
 checks=$(( checks + 1 ))
 [ -z "$(image_id "$unnamed_old")" ] || fail "the image of a profile without image: that the rebuild left dangling is removed"
+
+sed 's|^    image: .*|    image: localhost:1/acme/shop-jig-e2e:latest\
+    pull_policy: always|' "$tmp/compose-build.yml" >"$overlay/compose.yml"
+(export E2E_RUN=$build_id-pull && jig smoke)
+equals "a smoke whose app builds with pull_policy: always exits 0" "$?" 0
+for f in "$tmp/out" "$tmp/err"; do
+  lacks "up runs the image jig built and pulls nothing over it: ${f##*/}" "$f" "Pulling"
+done
+equals "jig built the image under the profile's name" \
+  "$(docker image inspect --format '{{index .Config.Labels "jig.repo"}}' localhost:1/acme/shop-jig-e2e:latest 2>&1)" acme/shop
 cp "$tmp/compose-build.yml" "$overlay/compose.yml"
 unset E2E_BUILD_SECRET
 

@@ -276,7 +276,9 @@ new image and the old one becomes dangling. A service that builds without `image
 in the same file, one per repository and service: `jig-<owner>_<repo>-<service>` (an owner, repository or
 service name with characters other than lowercase latin letters, digits and `-` is lowercased, those
 characters turned into `-`, and a checksum of the original name added), so its old images are removed
-too; compose's own name would differ per run (`jig-run_<owner>_<repo>_<slug>-app`). jig never touches other images or the build cache, and Docker skips an image
+too; compose's own name would differ per run (`jig-run_<owner>_<repo>_<slug>-app`). The same file sets
+`pull_policy: never` for the services that build, so `docker compose up` runs the image jig has just built
+and never pulls one over it, whatever `pull_policy` the profile gives. jig never touches other images or the build cache, and Docker skips an image
 that a container still uses.
 
 ### Build secrets
@@ -691,8 +693,8 @@ The run directory `$JIG_HOME/runs/<owner>/<repo>/<slug>/` stays after the run:
 - `compose.profile.yml`: the compose file jig added for the profile mount and `JIG_BASE`;
 - `system-prompt.md`: the engine rules and the overlay rules, as the agent got them;
 - `compose.harness.yml`: the compose file jig added for the harness and plan mounts;
-- `compose.build.yml`: the compose file jig added for the `jig.repo` label of the services that build and
-  the image name of those without `image:`
+- `compose.build.yml`: the compose file jig added for the `jig.repo` label and `pull_policy: never` of the
+  services that build and the image name of those without `image:`
   (none when no service builds).
 
 The clone `repo/` is gone after the run: it holds the agent's `.git`, whose hooks and config any
@@ -772,7 +774,7 @@ command lines, and none carries a secret value.
 Both need bash and git 2.29 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
 
-`test/run_e2e.sh` runs eleven `jig smoke`s and twenty `jig run`s end to end against a local bare repository that
+`test/run_e2e.sh` runs twelve `jig smoke`s and twenty `jig run`s end to end against a local bare repository that
 `origin`, `git@github.com:acme/shop.git`, reaches through a fake `ssh` (`GIT_SSH_COMMAND`), with a
 fake `claude` mounted over `/usr/local/bin/claude` (it records its arguments and names a model in its
 log) and a fake `gh` on `PATH` that records its calls, so it needs no credential and no network. With
@@ -802,7 +804,9 @@ value (a `docker` on `PATH` records each call and whether the variable is set); 
 for `docker`, `git`, `grep`, `sed`, `awk` and the other commands jig runs on the host record every
 command line of every run and smoke, none of which carries the credential or the build secret; each
 rebuild removes the image it left dangling while another repository's dangling image stays, and so does a
-rebuild of a profile without `image:`, whose image jig names `jig-acme_shop-app`. It also reads made-up
+rebuild of a profile without `image:`, whose image jig names `jig-acme_shop-app`; a profile with
+`pull_policy: always` and an image name no registry serves (`localhost:1/...`) builds and starts without a
+pull. It also reads made-up
 `claude.log`s with `lib/agent-log.js` in the image, values out of shape and past their limits among them. It runs only when
 `JIG_E2E_IMAGE` names a local image with bash, git, node and `timeout` (it is never pulled) and Docker is
 running, and skips otherwise. The images it builds are small layers over that image or `scratch`, labelled

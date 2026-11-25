@@ -1195,13 +1195,15 @@ equals "services that build are found and get jig's label file" "$(inspect)" \
   "ok|app worker|-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml -f $tmp/compose/compose.build.yml"
 equals "the config is read with markers in place of the build secrets' values" "$(cat "$tmp/docker.calls")" \
   "compose -p jig-run_acme_shop_x -f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml config --format json|E2E_SECRET=jig_build_secret_marker_E2E_SECRET_end"
-equals "the label file labels each service that builds with the repository and names the image of one the profile leaves unnamed" \
+equals "jig's file labels each service that builds with the repository, never pulls its image and names the image of one the profile leaves unnamed" \
   "$(cat "$tmp/compose/compose.build.yml")" 'services:
   "app":
+    pull_policy: never
     build:
       labels:
         jig.repo: "acme/shop"
   "worker":
+    pull_policy: never
     image: "jig-acme_shop-worker"
     build:
       labels:
