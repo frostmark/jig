@@ -61,7 +61,8 @@ for url in /srv/git/shop.git file:///srv/github.com/acme/shop.git https://gitlab
   https://github.com/acme/shop.git/extra 'https://github.com/acme/sh op' 'https://github.com/acme/shop;id' \
   'https://github.com/acme/$(id)' https://github.com/../shop https://github.com/acme/.. https://github.com/./shop \
   https://github.com/acme/.git ftp://github.com/acme/shop 'git@github.com:acme/shop:x' https://github.com//shop \
-  'git@github.com acme/shop' "https://github.com/acme/shop
+  'git@github.com acme/shop' xssh://git@github.com/acme/shop /srv/github.com:acme/shop git@github.com:acme/shop/extra \
+  "https://github.com/acme/shop
 https://github.com/acme/other" https://github.com/acme/shоp; do
   github_repo "$url" refused
 done
@@ -256,8 +257,10 @@ checks=$(( checks + 1 ))
 [[ ! $branch_rules =~ @[A-Z_]+@ ]] || fail "the branch rules keep a placeholder: $branch_rules"
 equals "branch rules differ from pr rules only in the delivery sentences" \
   "$(diff <(printf '%s\n' "$rules") <(printf '%s\n' "$branch_rules") | grep -c '^[<>]')" 6
-checks=$(( checks + 1 ))
-(profile_deliver=queue && jig_engine_rules >/dev/null 2>&1) && fail "rules for an unknown delivery mode are refused"
+for mode in queue ""; do
+  checks=$(( checks + 1 ))
+  (profile_deliver="$mode" && jig_engine_rules >/dev/null 2>&1) && fail "rules for an unknown delivery mode are refused: \"$mode\""
+done
 jig_parse_profile cfg <<<"base main
 setup .jig/setup
 verify .jig/verify
