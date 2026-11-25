@@ -440,7 +440,10 @@ top="$(
     echo "- Plan: \`$run/plan.md\`"
     echo
     echo '```sh'
-    jig_branch_commands "$repo_root" "$base" "$branch"
+    jig_log_command "$repo_root" "$base" "$branch"
+    echo
+    jig_diff_command "$repo_root" "$base" "$branch"
+    echo
     echo '```'
   fi
   if [ -n "$attention" ]; then
@@ -470,7 +473,7 @@ if [ "$profile_deliver" = branch ]; then
   fi
   echo "$jig_name: $profile_verify: $verify_text"
   echo "$jig_name: report: $report"
-  echo "$jig_name: diff: $(jig_branch_commands "$repo_root" "$base" "$branch" | sed -n 2p)"
+  echo "$jig_name: diff: $(jig_diff_command "$repo_root" "$base" "$branch")"
   [ -z "$reasons" ] || exit 1
   exit 0
 fi

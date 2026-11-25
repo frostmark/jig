@@ -139,10 +139,12 @@ jig_shell_word() {
   fi
 }
 
-jig_branch_commands() {
-  local repo="$1" base="$2" branch="$3"
-  printf 'git -C %s log --oneline %s..%s\n' "$(jig_shell_word "$repo")" "$base" "$branch"
-  printf 'git -C %s diff %s...%s\n' "$(jig_shell_word "$repo")" "$base" "$branch"
+jig_log_command() {
+  printf 'git -C %s log --oneline %s..%s' "$(jig_shell_word "$1")" "$2" "$3"
+}
+
+jig_diff_command() {
+  printf 'git -C %s diff %s...%s' "$(jig_shell_word "$1")" "$2" "$3"
 }
 
 jig_report_branch() {

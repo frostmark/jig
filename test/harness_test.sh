@@ -814,10 +814,14 @@ line" ''; do
     fail "a path with shell characters is one quoted shell word: $word -> $quoted"
 done
 equals "a quote in a path is closed, escaped and reopened" "$(jig_shell_word "/srv/it's")" "'/srv/it'\\''s'"
-equals "the commands name the repository, the base commit and the branch" \
-  "$(jig_branch_commands "/home/dev/my shop" 0123abcd jig/add-health)" \
-  "git -C '/home/dev/my shop' log --oneline 0123abcd..jig/add-health
-git -C '/home/dev/my shop' diff 0123abcd...jig/add-health"
+equals "the log command names the repository, the base commit and the branch" \
+  "$(jig_log_command "/home/dev/my shop" 0123abcd jig/add-health)" "git -C '/home/dev/my shop' log --oneline 0123abcd..jig/add-health"
+equals "the diff command names the repository, the base commit and the branch" \
+  "$(jig_diff_command "/home/dev/my shop" 0123abcd jig/add-health)" "git -C '/home/dev/my shop' diff 0123abcd...jig/add-health"
+equals "the diff command is whole for a repository path with a line break" \
+  "$(jig_diff_command "/srv/new
+line" 0123abcd jig/x)" "git -C '/srv/new
+line' diff 0123abcd...jig/x"
 equals "the report names the repository, the branch with its commits and the base" \
   "$(jig_report_branch /home/dev/shop jig/add-health 2 main 0123abcd)" "- Repository: /home/dev/shop
 - Branch: jig/add-health (2 commits)
