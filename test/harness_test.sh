@@ -262,7 +262,7 @@ overlay plugin: none (no $JIG_PROFILES/acme/shop/plugin)
 mkdir "$tmp/run"
 printf '# Add a health check\n\nAnswer `GET /health` with 200.\n' >"$tmp/run/plan.md"
 equals "the PR body ends with the plan, fenced in a collapsed block, before the attribution" \
-  "$(jig_pr_body "$tmp/run/plan.md" '- verify: green
+  "$(jig_pr_body "$tmp/run/plan.md" copy.md '- verify: green
 
 ## Agent summary
 
@@ -285,7 +285,7 @@ Answer `GET /health` with 200.
 attribution'
 printf 'Run:\n\n````sh\n```\nmake\n````\n' >"$tmp/run/fenced.md"
 equals "the fence is longer than the plan's longest backtick run" \
-  "$(jig_pr_body "$tmp/run/fenced.md" top end | sed -n '5p;12p')" '`````markdown
+  "$(jig_pr_body "$tmp/run/fenced.md" copy.md top end | sed -n '5p;12p')" '`````markdown
 `````'
 
 fill() {
@@ -299,16 +299,16 @@ fill 83 p >"$tmp/run/over.md"
 utf8="$(locale -a 2>/dev/null | grep -i -m 1 -E '^(c|en_us)\.utf-?8$')"
 top="$(printf '\342\206\222%.0s' $(seq 1 16))rr"
 equals "a body of exactly the limit keeps the whole plan" \
-  "$( (cd "$tmp/run" && export LC_ALL="${utf8:-C}" && jig_pr_body_max=200 && jig_pr_body fits.md "$top" t | bytes) 2>&1)" 200
+  "$( (export LC_ALL="${utf8:-C}" && jig_pr_body_max=200 && jig_pr_body "$tmp/run/fits.md" copy.md "$top" t | bytes) 2>&1)" 200
 equals "a plan one byte over the limit is cut, multibyte characters counted in bytes" \
-  "$( (cd "$tmp/run" && export LC_ALL="${utf8:-C}" && jig_pr_body_max=200 && jig_pr_body over.md "$top" t | sed -n 3p) 2>&1)" \
+  "$( (export LC_ALL="${utf8:-C}" && jig_pr_body_max=200 && jig_pr_body "$tmp/run/over.md" copy.md "$top" t | sed -n 3p) 2>&1)" \
   "<details><summary>Plan (cut)</summary>"
 
 for n in a b c d e f g h i j k l m n o p q r s t; do
   printf 'line %s \342\206\222\n' "$n"
 done >"$tmp/run/plan.md"
 cut_at() {
-  (cd "$tmp/run" && jig_pr_body_max=$1 && jig_pr_body plan.md top end) 2>&1
+  (jig_pr_body_max=$1 && jig_pr_body "$tmp/run/plan.md" copy.md top end) 2>&1
 }
 equals "a cut plan keeps the whole lines that fit and names its copy" "$(cut_at 186)" 'top
 
@@ -320,7 +320,7 @@ line b →
 line c →
 ```
 
-*The plan is cut here: it has 220 bytes, the whole plan is in `plan.md`.*
+*The plan is cut here: it has 220 bytes, the whole plan is in `copy.md`.*
 
 </details>
 
@@ -332,7 +332,7 @@ line b →
 ```'
 equals "no room for a line: the block holds only the note" "$(cut_at 160 | sed -n 3,7p)" '<details><summary>Plan (cut)</summary>
 
-*The plan is cut here: it has 220 bytes, the whole plan is in `plan.md`.*
+*The plan is cut here: it has 220 bytes, the whole plan is in `copy.md`.*
 
 </details>'
 
@@ -343,7 +343,7 @@ equals "no room for a line: the block holds only the note" "$(cut_at 160 | sed -
   done
 } >"$tmp/run/open-fence.md"
 cut_open_fence() {
-  (cd "$tmp/run" && jig_pr_body_max=300 && jig_pr_body open-fence.md top end) 2>&1
+  (jig_pr_body_max=300 && jig_pr_body "$tmp/run/open-fence.md" fence-copy.md top end) 2>&1
 }
 equals "a plan cut inside its own open fence: jig's longer fence closes the block before the note" \
   "$(cut_open_fence | sed '/^echo /d')" 'top
@@ -356,7 +356,7 @@ Steps:
 ```sh
 ````
 
-*The plan is cut here: it has 806 bytes, the whole plan is in `open-fence.md`.*
+*The plan is cut here: it has 806 bytes, the whole plan is in `fence-copy.md`.*
 
 </details>
 
@@ -366,7 +366,7 @@ echo 16'
 
 head_lines="$(for n in $(seq -w 1 20); do echo "line $n"; done)"
 equals "a head that leaves no room for the plan's note is cut after its last whole line that fits" \
-  "$( (cd "$tmp/run" && jig_pr_body_max=218 && jig_pr_body plan.md "$head_lines" end) 2>&1)" 'line 01
+  "$( (jig_pr_body_max=218 && jig_pr_body "$tmp/run/plan.md" copy.md "$head_lines" end) 2>&1)" 'line 01
 line 02
 line 03
 
@@ -374,15 +374,15 @@ line 03
 
 <details><summary>Plan (cut)</summary>
 
-*The plan is cut here: it has 220 bytes, the whole plan is in `plan.md`.*
+*The plan is cut here: it has 220 bytes, the whole plan is in `copy.md`.*
 
 </details>
 
 end'
 equals "the cut head fills the limit exactly" \
-  "$( (cd "$tmp/run" && jig_pr_body_max=218 && jig_pr_body plan.md "$head_lines" end | bytes) 2>&1)" 218
+  "$( (jig_pr_body_max=218 && jig_pr_body "$tmp/run/plan.md" copy.md "$head_lines" end | bytes) 2>&1)" 218
 equals "a head line that would pass the limit by one byte is left out" \
-  "$( (cd "$tmp/run" && jig_pr_body_max=217 && jig_pr_body plan.md "$head_lines" end | sed -n 1,4p) 2>&1)" 'line 01
+  "$( (jig_pr_body_max=217 && jig_pr_body "$tmp/run/plan.md" copy.md "$head_lines" end | sed -n 1,4p) 2>&1)" 'line 01
 line 02
 
 *The description is cut here to stay within GitHub'"'"'s limit.*'
@@ -449,7 +449,7 @@ equals "a cut summary ends with its note after a blank line" "$(printf '%s' "$su
 for n in $(seq 1 3000); do
   printf 'Step %s: change the handler and its spec.\n' "$n"
 done >"$tmp/run/plan.md"
-jig_pr_body "$tmp/run/plan.md" "$(fill 40000 s)" "🤖 Generated with [Claude Code](https://claude.com/claude-code)" >"$tmp/run/pr-body.md"
+jig_pr_body "$tmp/run/plan.md" copy.md "$(fill 40000 s)" "🤖 Generated with [Claude Code](https://claude.com/claude-code)" >"$tmp/run/pr-body.md"
 checks=$(( checks + 1 ))
 size="$(bytes <"$tmp/run/pr-body.md")"
 [ "$size" -le 65536 ] && [ "$size" -gt 65400 ] ||

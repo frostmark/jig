@@ -49,7 +49,7 @@ jig_pr_render() {
 # Sizes are counted in bytes, which are never fewer than the characters GitHub counts.
 # The fence is longer than any backtick run in the plan, so no line of the plan can close it.
 jig_pr_body() {
-  local plan="$1" head="$2" tail="$3" LC_ALL=C
+  local plan="$1" shown="$2" head="$3" tail="$4" LC_ALL=C
   local fence text open note max
   fence="$(LC_ALL=C awk '{ s = $0; while (match(s, /`+/)) { if (RLENGTH > m) m = RLENGTH; s = substr(s, RSTART + RLENGTH) } }
     END { for (n = (m < 3 ? 3 : m + 1); n > 0; n--) printf "`" }' "$plan")" || return 1
@@ -59,7 +59,7 @@ $text
 $fence" "$tail"
   [ "${#jig_pr_text}" -gt "$jig_pr_body_max" ] || { printf '%s' "$jig_pr_text"; return 0; }
   open='<details><summary>Plan (cut)</summary>'
-  note="*The plan is cut here: it has $(LC_ALL=C wc -c <"$plan" | tr -d ' ') bytes, the whole plan is in \`$plan\`.*"
+  note="*The plan is cut here: it has $(LC_ALL=C wc -c <"$plan" | tr -d ' ') bytes, the whole plan is in \`$shown\`.*"
   jig_pr_render "$head" "$open" "$note" "$tail"
   if [ "${#jig_pr_text}" -gt "$jig_pr_body_max" ]; then
     max=$(( jig_pr_body_max - ${#jig_pr_text} + ${#head} - ${#jig_pr_cut_mark} - 2 ))

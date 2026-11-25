@@ -59,6 +59,7 @@ case "$remote_status" in
 esac
 
 run="$jig_home/runs/$gh_owner/$gh_name/$slug"
+run_shown="\$JIG_HOME/runs/$gh_owner/$gh_name/$slug"
 [ ! -e "$run" ] || jig_fail "run directory $run already exists: remove it (rm -rf) to reuse the name"
 
 jig_project="jig-run_${docker_repo}_$slug"
@@ -325,7 +326,7 @@ elif grep -q 'JIG_BLOCKED\.md$' "$run/status.txt"; then
 fi
 if [ -n "$blocked_file" ]; then
   blocked="$(jig_pr_excerpt "$jig_pr_blocked_max" "$run/$blocked_file" '    > ' \
-    "    > (cut: the whole text is in \`$run/$blocked_file\`)")" || die "could not read $run/$blocked_file"
+    "    > (cut: the whole text is in \`$run_shown/$blocked_file\`)")" || die "could not read $run/$blocked_file"
   [ -n "$blocked" ] || blocked="    > (empty)"
   [ "$blocked_file" = blocked-branch.md ] || blocked="$blocked
     > (left uncommitted in the clone)"
@@ -340,7 +341,7 @@ note() { attention="$attention- $1
 "; }
 if [ "$verify_status" != 0 ]; then
   reasons="$reasons $profile_verify red;"
-  note "$profile_verify is red (exit $verify_status): see \`$run/verify.log\`."
+  note "$profile_verify is red (exit $verify_status): see \`$run_shown/verify.log\`."
 fi
 if [ "$timed_out" = 1 ]; then
   reasons="$reasons timeout;"
@@ -383,8 +384,8 @@ $status_lines\`\`\`"
 fi
 
 summary="$(jig_pr_excerpt "$jig_pr_summary_max" "$run/summary.md" '' "
-*The summary is cut here: the whole message is in \`$run/summary.md\`.*")" || die "could not read $run/summary.md"
-[ -n "$summary" ] || summary="(the agent left no final message: see \`$run/claude.log\`)"
+*The summary is cut here: the whole message is in \`$run_shown/summary.md\`.*")" || die "could not read $run/summary.md"
+[ -n "$summary" ] || summary="(the agent left no final message: see \`$run_shown/claude.log\`)"
 if [ "$verify_status" = 0 ]; then verify_text="green"; else verify_text="red (exit $verify_status)"; fi
 agent_text="exit $agent_status"
 [ -z "$agent_meta" ] || agent_text="$agent_text, $agent_meta"
@@ -394,7 +395,7 @@ pr_top="$(
   echo "- $profile_verify: $verify_text"
   echo "- Agent: $agent_text"
   echo "- Duration: $(elapsed "$started") in total, agent $agent_duration (limit $minutes min)"
-  echo "- Log: \`$run/claude.log\`"
+  echo "- Log: \`$run_shown/claude.log\`"
   if [ -n "$attention" ]; then
     echo
     echo "## Needs attention"
@@ -410,7 +411,7 @@ pr_top="$(
   echo
   printf '%s\n' "$summary"
 )" || die "could not compose the PR description"
-jig_pr_body "$run/plan.md" "$pr_top" "🤖 Generated with [Claude Code](https://claude.com/claude-code)" >"$body" ||
+jig_pr_body "$run/plan.md" "$run_shown/plan.md" "$pr_top" "🤖 Generated with [Claude Code](https://claude.com/claude-code)" >"$body" ||
   die "could not write $body"
 
 refuse_leaks plan.md pr-body.md
