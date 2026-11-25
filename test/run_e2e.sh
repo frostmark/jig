@@ -102,10 +102,11 @@ if grep -q -x NO-COMMIT /jig/plan.md; then
   result "Nothing to do."
 elif grep -q -x OVERSIZED /jig/plan.md; then
   printf '%10000s' '' | tr ' ' '\n' >JIG_BLOCKED.md
-  echo big >big.txt
-  git add JIG_BLOCKED.md big.txt
-  git commit -q -m "Add big.txt"
   long="$(printf '%240s' '' | tr ' ' x)"
+  echo big >big.txt
+  echo protected >".jig/protected-$long"
+  git add JIG_BLOCKED.md big.txt ".jig/protected-$long"
+  git commit -q -m "Add big.txt"
   for n in $(seq 10 69); do
     : >"untracked-$n-$long"
   done
@@ -309,6 +310,8 @@ has_line "the quoted JIG_BLOCKED.md says where the whole text is" "$body" \
 equals "50 status lines, each cut to 200 bytes" \
   "$(grep '^?? untracked-' "$body" | awk 'length($0) == 200 && /\.\.\.$/' | wc -l | tr -d ' ')" 50
 has_line "the status lines past 50 are counted" "$body" "... and 10 more"
+equals "a protected path is listed cut to 200 bytes" \
+  "$(grep -c -x '  - `\.jig/protected-x\{182\}\.\.\.`' "$body")" 1
 has_line "the cut summary says where the whole message is" "$body" \
   "*The summary is cut here: the whole message is in \`$shown/oversized/summary.md\`.*"
 equals "the cut plan sits in a fence longer than its own open fence" \

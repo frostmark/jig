@@ -283,9 +283,9 @@ Answer `GET /health` with 200.
 </details>
 
 attribution'
-printf 'Run:\n\n````sh\n```\nmake\n````\n' >"$tmp/run/fenced.md"
-equals "the fence is longer than the plan's longest backtick run" \
-  "$(jig_pr_body "$tmp/run/fenced.md" copy.md top end | sed -n '5p;12p')" '`````markdown
+printf 'Run `make` or ````:\n\n```sh\nmake\n```\n' >"$tmp/run/fenced.md"
+equals "the fence is longer than the plan's longest backtick run, wherever it is in a line" \
+  "$(jig_pr_body "$tmp/run/fenced.md" copy.md top end | sed -n '5p;11p')" '`````markdown
 `````'
 
 fill() {
@@ -429,6 +429,9 @@ printf 'ab\ncd\nef' >"$tmp/run/lines.md"
 equals "an excerpt one byte over the limit is cut on a line and ends with the note" \
   "$(jig_pr_excerpt 7 "$tmp/run/lines.md" '' X)" 'ab
 cd
+X'
+printf 'abcdefghij' >"$tmp/run/letters.md"
+equals "a cut excerpt fills its limit exactly" "$(jig_pr_excerpt 6 "$tmp/run/letters.md" '' X)" 'abcd
 X'
 printf '%s' "$arrows$arrows" >"$tmp/run/arrows.md"
 equals "an excerpt without line breaks is cut on a character" \
