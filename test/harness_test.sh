@@ -940,16 +940,16 @@ jig_secret_values=()
 read_secrets() {
   (profile_build_secrets=("$@") && jig_read_build_secrets && printf '%s|' "${jig_secret_names[@]}" "${jig_secret_values[@]}") 2>&1
 }
-export E2E_A='acme:ghp_x/y&z' E2E_B='[a]*?\1' E2E_EMPTY='' E2E_LINE='a
+export E2E_A='acme:ghp_x/y&z' E2E_B='[a]*?\12' E2E_EMPTY='' E2E_LINE='a
 b' E2E_TAB='a	b' E2E_CR=$'a\rb'
 unset E2E_UNSET
 equals "build secrets join the secrets with their values, a backslash also in its JSON form" "$(read_secrets E2E_A E2E_B)" \
-  "E2E_A|E2E_B|E2E_B|acme:ghp_x/y&z|[a]*?\\\\1|[a]*?\\1|"
+  "E2E_A|E2E_B|E2E_B|acme:ghp_x/y&z|[a]*?\\\\12|[a]*?\\12|"
 equals "no build secrets add nothing" "$( (profile_build_secrets=() && jig_read_build_secrets && echo "${#jig_secret_values[@]}") 2>&1)" 0
 equals "a build secret leaves jig's environment once read, and jig keeps its value for the build" \
   "$( (export E2E_KEEP=unrelated && profile_build_secrets=(E2E_A E2E_B) && jig_read_build_secrets &&
     printf '%s|' "${E2E_A-unset}" "${E2E_B-unset}" "$(env | grep -c -e '^E2E_A=' -e '^E2E_B=')" "${E2E_KEEP-unset}" "${jig_build_values[@]}") 2>&1)" \
-  'unset|unset|0|unrelated|acme:ghp_x/y&z|[a]*?\1|'
+  'unset|unset|0|unrelated|acme:ghp_x/y&z|[a]*?\12|'
 exits_2 "an unset build secret stops jig and names it" \
   "jig: the profile's build-secret E2E_UNSET is not set: export E2E_UNSET before jig builds (jig hands its value only to docker compose, for the build)" \
   read_secrets E2E_A E2E_UNSET
@@ -960,7 +960,12 @@ for name in E2E_LINE E2E_TAB E2E_CR; do
     read_secrets "$name"
 done
 equals "the refusal does not print the value" "$(read_secrets E2E_LINE | grep -c -e '^b' -e 'a	b')" 0
-unset E2E_A E2E_B E2E_EMPTY E2E_LINE E2E_TAB E2E_CR
+exits_2 "a build secret shorter than 8 characters stops jig and names it" \
+  "jig: the value of the build secret E2E_SHORT is shorter than 8 characters: jig replaces it with [REDACTED] wherever it appears in its logs, and so short a value would hide ordinary text" \
+  env E2E_SHORT=a2c4e6g bash -c "$(declare -f read_secrets jig_read_build_secrets jig_add_secret jig_insert_secret jig_fail); jig_name=jig; read_secrets E2E_SHORT"
+equals "the short value is not printed" "$(E2E_SHORT=a2c4e6g read_secrets E2E_SHORT | grep -c a2c4e6g)" 0
+equals "8 characters are enough" "$(E2E_EIGHT=a2c4e6g8 read_secrets E2E_EIGHT)" "E2E_EIGHT|a2c4e6g8|"
+unset E2E_A E2E_B E2E_EMPTY E2E_LINE E2E_TAB E2E_CR E2E_SHORT E2E_EIGHT
 
 docker() {
   printf '%s\n' "$*" >>"$tmp/docker.calls"

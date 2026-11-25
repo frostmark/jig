@@ -49,6 +49,8 @@ jig_read_build_secrets() {
       jig_fail "the profile's build-secret $name is not set: export $name before jig builds (jig hands its value only to docker compose, for the build)"
     [[ $value != *[[:cntrl:]]* ]] ||
       jig_fail "the value of the build secret $name has a line break or another control character, which jig cannot look for in its logs"
+    [ "${#value}" -ge 8 ] ||
+      jig_fail "the value of the build secret $name is shorter than 8 characters: jig replaces it with [REDACTED] wherever it appears in its logs, and so short a value would hide ordinary text"
     jig_add_secret "$name" "$value"
     jig_build_values+=("$value")
     unset "$name"

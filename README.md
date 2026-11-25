@@ -305,8 +305,9 @@ and declare the variable in `.jig/config` or the overlay's `config`: `build-secr
 Then `jig run` and `jig smoke`:
 
 - stop with exit code 2 before anything runs when a declared variable is unset or empty in the
-  environment that starts jig, or its value holds a line break or another control character; the message
-  names the variable, never its value. BuildKit leaves secrets out of the build cache's key, so without this
+  environment that starts jig, or its value holds a line break or another control character or is shorter
+  than 8 characters (jig replaces the value wherever it appears in its logs, and a shorter one would hide
+  ordinary text); the message names the variable, never its value. BuildKit leaves secrets out of the build cache's key, so without this
   check a missing secret would fail only a build whose cache is cold;
 - remove each declared variable from jig's own environment once they have read it, and hand the values
   only to `docker compose build`: `docker compose up` and every command after it run without them;
