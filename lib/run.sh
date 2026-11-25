@@ -50,6 +50,7 @@ jig_find_overlay
 jig_resolve_base
 [ "$profile_deliver" = branch ] || jig_check_gh
 jig_agent_options
+jig_read_build_secrets
 
 if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$branch"; then
   jig_fail "branch $branch already exists locally: pick another plan file name or git -C $repo_root branch -D $branch"

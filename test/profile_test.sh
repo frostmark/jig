@@ -198,7 +198,7 @@ refused "repeated effort" "$valid
 effort low
 effort max" "cfg:5: effort is already set on line 4"
 refused "the unknown key message lists the keys" "$valid
-colour red" "known keys: base, setup, verify, protect, model, effort, deliver"
+colour red" "known keys: base, setup, verify, protect, model, effort, deliver, build-secret)"
 
 jig_parse_profile cfg <<<"$valid"
 equals "deliver is pr by default" "$profile_deliver" pr
@@ -221,6 +221,37 @@ deliver bran" "cfg:4: deliver must be pr or branch"
 refused "repeated deliver" "$valid
 deliver branch
 deliver pr" "cfg:5: deliver is already set on line 4"
+
+jig_parse_profile cfg <<<"$valid
+build-secret BUNDLE_GITHUB__COM
+build-secret	NPM_TOKEN
+build-secret _X1"
+equals "build secrets in the order they are declared" "${profile_build_secrets[*]}" "BUNDLE_GITHUB__COM NPM_TOKEN _X1"
+jig_parse_profile cfg <<<"$valid"
+equals "no build-secret: the previous profile's build secrets are gone" "${#profile_build_secrets[@]}" 0
+for name in npm_token NPM-TOKEN 1NPM NPM.TOKEN 'NPM$TOKEN' 'NPM;id' NPM_TOKÉN Npm_TOKEN; do
+  refused "build-secret $name is not a variable name of capital letters" "$valid
+build-secret $name" "cfg:4: build-secret must be an environment variable name of capital latin letters, digits and _, not starting with a digit"
+done
+for name in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL \
+  JIG_BASE JIG_WORKSPACE JIG_; do
+  refused "build-secret $name is jig's own" "$valid
+build-secret $name" "cfg:4: build-secret cannot be $name: jig sets or passes the model credential, the git author and committer and the JIG_ variables itself"
+done
+for name in GIT_TOKEN CLAUDE_CODE_OAUTH_TOKEN_2 XJIG_TOKEN ANTHROPIC_API_KEYS; do
+  parses "build-secret $name is no name of jig's" "$valid
+build-secret $name"
+done
+refused "a build secret declared twice" "$valid
+build-secret NPM_TOKEN
+build-secret BUNDLE_GITHUB__COM
+build-secret NPM_TOKEN" "cfg:6: build-secret NPM_TOKEN is already declared on line 4"
+refused "build-secret without a value" "$valid
+build-secret" "cfg:4: expected a line"
+refused "a key with a dash that is not known" "$valid
+build-secrets NPM_TOKEN" "cfg:4: unknown key build-secrets"
+refused "a key starting with a dash" "$valid
+-build NPM_TOKEN" "cfg:4: expected a line"
 
 jig_parse_profile cfg <<<"base main
 setup bin/setup

@@ -8,6 +8,7 @@ jig_name=jig
 . "$root/lib/profile.sh"
 . "$root/lib/harness.sh"
 . "$root/lib/pr.sh"
+. "$root/lib/build.sh"
 
 failures=0
 checks=0
@@ -927,6 +928,27 @@ plain line
 $near"
 jig_secret_names=()
 jig_secret_values=()
+
+read_secrets() {
+  (profile_build_secrets=("$@") && jig_read_build_secrets && printf '%s|' "${jig_secret_names[@]}" "${jig_secret_values[@]}") 2>&1
+}
+export E2E_A='acme:ghp_x/y&z' E2E_B='[a]*?\1' E2E_EMPTY='' E2E_LINE='a
+b' E2E_TAB='a	b' E2E_CR=$'a\rb'
+unset E2E_UNSET
+equals "build secrets join the secrets with their values, a backslash also in its JSON form" "$(read_secrets E2E_A E2E_B)" \
+  "E2E_A|E2E_B|E2E_B|acme:ghp_x/y&z|[a]*?\\1|[a]*?\\\\1|"
+equals "no build secrets add nothing" "$( (profile_build_secrets=() && jig_read_build_secrets && echo "${#jig_secret_values[@]}") 2>&1)" 0
+exits_2 "an unset build secret stops jig and names it" \
+  "jig: the profile's build-secret E2E_UNSET is not set: export E2E_UNSET before jig builds (jig hands its value only to docker compose, for the build)" \
+  read_secrets E2E_A E2E_UNSET
+exits_2 "an empty build secret counts as unset" "jig: the profile's build-secret E2E_EMPTY is not set" read_secrets E2E_EMPTY
+for name in E2E_LINE E2E_TAB E2E_CR; do
+  exits_2 "a build secret with a control character stops jig: $name" \
+    "jig: the value of the build secret $name has a line break or another control character, which jig cannot look for in its logs" \
+    read_secrets "$name"
+done
+equals "the refusal does not print the value" "$(read_secrets E2E_LINE | grep -c -e '^b' -e 'a	b')" 0
+unset E2E_A E2E_B E2E_EMPTY E2E_LINE E2E_TAB E2E_CR
 
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]

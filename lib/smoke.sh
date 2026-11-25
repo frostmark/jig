@@ -6,6 +6,7 @@ jig_repo_identity
 jig_find_overlay
 jig_load_profile "$head" HEAD
 jig_profile_report
+jig_read_build_secrets
 
 run="$jig_home/smoke/$gh_owner/$gh_name"
 jig_project="jig-smoke_$docker_repo"
