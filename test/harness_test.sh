@@ -999,13 +999,14 @@ df() {
   echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
   case "$2" in
     "$tmp/docker-root") echo "/dev/vm 100 50 $root_kib 50% /var/lib/docker" ;;
-    *) echo "/dev/disk3s5 100 50 $home_kib 50% /System/Volumes/Data" ;;
+    *) echo "${home_fs:-/dev/disk3s5} 100 50 $home_kib 50% ${home_mount:-/System/Volumes/Data}" ;;
   esac
 }
 docker() {
   printf '%s\n' "$*" >>"$tmp/docker.calls"
-  case "$1" in
-    info) [ "$docker_root" != fail ] && echo "$docker_root" ;;
+  case "$1 $2" in
+    "info --format") [ "$docker_root" != fail ] && echo "${docker_os:-Ubuntu 24.04}|$docker_root" ;;
+    "context inspect") [ "${docker_host:-}" != fail ] && echo "${docker_host:-unix:///var/run/docker.sock}" ;;
     *) return 1 ;;
   esac
 }
@@ -1013,35 +1014,55 @@ disk() {
   rm -f "$tmp/df.calls" "$tmp/docker.calls"
   (jig_home="$tmp/home/.jig" && jig_check_disk) 2>&1
 }
+disk_env() {
+  local name="$1" want="$2"
+  shift 2
+  exits_2 "$name" "$want" env "$@" bash -c "$(declare -f df docker disk jig_check_disk jig_check_free jig_free_kib jig_fail printable); $(declare -p jig_df_awk jig_min_free_re); jig_name=jig tmp='$tmp' home_kib=$home_kib root_kib=$root_kib docker_root=$docker_root; disk"
+}
 mkdir "$tmp/docker-root"
 unset JIG_MIN_FREE_GB
 home_kib=$(( 20 * gib )) root_kib=$(( 20 * gib )) docker_root=/var/lib/docker
 equals "20 GiB free passes the default" "$(disk)" ""
 equals "a JIG_HOME that does not exist yet is checked on its nearest directory" "$(cat "$tmp/df.calls")" "-Pk $tmp"
-equals "Docker's data root is asked for" "$(cat "$tmp/docker.calls")" "info --format {{.DockerRootDir}}"
+equals "Docker's system and data root and the context's endpoint are asked for" "$(cat "$tmp/docker.calls")" \
+  "info --format {{.OperatingSystem}}|{{.DockerRootDir}}
+context inspect --format {{.Endpoints.docker.Host}}"
 home_kib=$(( 20 * gib - 1 ))
 exits_2 "less than 20 GiB free under JIG_HOME stops jig, saying how much is free and what to do" \
   "jig: the filesystem of JIG_HOME ($tmp/home/.jig) has 19.9 GiB free, less than JIG_MIN_FREE_GB=20. Free space before jig builds (docker system df shows what Docker holds, docker builder prune removes its build cache), or lower JIG_MIN_FREE_GB (0 turns the check off)" \
   disk
-home_kib=$(( 3 * gib / 2 ))
-exits_2 "JIG_MIN_FREE_GB sets the limit" "has 1.5 GiB free, less than JIG_MIN_FREE_GB=2." env JIG_MIN_FREE_GB=2 bash -c "$(declare -f df docker disk jig_check_disk jig_check_free jig_free_kib jig_fail printable); jig_name=jig tmp='$tmp' home_kib=$home_kib root_kib=$root_kib docker_root=$docker_root jig_min_free_re='$jig_min_free_re'; disk"
+home_fs='map auto_home' home_mount='/Volumes/My Disk 2'
+exits_2 "a filesystem name and a mount point with spaces are read right" \
+  "jig: the filesystem of JIG_HOME ($tmp/home/.jig) has 19.9 GiB free, less than JIG_MIN_FREE_GB=20." disk
+home_kib=$(( 20 * gib ))
+equals "enough space with spaces in the names passes" "$(disk)" ""
+home_mount=''
+equals "a filesystem name with spaces alone is read right" "$(disk)" ""
+home_fs='' home_mount='/Volumes/My 1 2 3% Disk'
+equals "a mount point with spaces and numbers is read right" "$(disk)" ""
+home_mount='' home_kib=$(( 3 * gib / 2 ))
+disk_env "JIG_MIN_FREE_GB sets the limit" "has 1.5 GiB free, less than JIG_MIN_FREE_GB=2." JIG_MIN_FREE_GB=2
 equals "JIG_MIN_FREE_GB=1 passes 1.5 GiB" "$(JIG_MIN_FREE_GB=1 disk)" ""
 equals "JIG_MIN_FREE_GB=0 turns the check off" "$(JIG_MIN_FREE_GB=0 home_kib=0 disk; cat "$tmp/df.calls" "$tmp/docker.calls" 2>/dev/null)" ""
 equals "an empty JIG_MIN_FREE_GB is the default" "$(JIG_MIN_FREE_GB='' home_kib=$(( 19 * gib )) disk | grep -c 'JIG_MIN_FREE_GB=20\.')" 1
 for value in abc -1 1.5 01 ' 5' '5 ' 1234567 0x10 '5;id'; do
-  exits_2 "JIG_MIN_FREE_GB must be a whole number: $value" \
-    "jig: JIG_MIN_FREE_GB must be a whole number of GiB (0 turns the check off)" env JIG_MIN_FREE_GB="$value" \
-    bash -c "$(declare -f df docker disk jig_check_disk jig_check_free jig_free_kib jig_fail printable); jig_name=jig tmp='$tmp' home_kib=$home_kib jig_min_free_re='$jig_min_free_re'; disk"
+  disk_env "JIG_MIN_FREE_GB must be a whole number: $value" \
+    "jig: JIG_MIN_FREE_GB must be a whole number of GiB (0 turns the check off)" JIG_MIN_FREE_GB="$value"
 done
 equals "the largest JIG_MIN_FREE_GB is accepted" "$(JIG_MIN_FREE_GB=999999 home_kib=$(( 999999 * gib )) disk)" ""
 home_kib=$(( 20 * gib )) docker_root="$tmp/docker-root"
-equals "Docker's data root on the host is checked too" "$(disk; cat "$tmp/df.calls")" "-Pk $tmp
+equals "the data root of a Docker on a local socket is checked too" "$(disk; cat "$tmp/df.calls")" "-Pk $tmp
 -Pk $tmp/docker-root"
 root_kib=$(( 5 * gib ))
 exits_2 "Docker's data root with too little space stops jig" \
   "jig: the filesystem of Docker's data root ($tmp/docker-root) has 5.0 GiB free, less than JIG_MIN_FREE_GB=20." disk
+equals "Docker Desktop's data root is in its VM and skipped, even where the same path exists on the host" \
+  "$(docker_os='Docker Desktop' disk; cat "$tmp/df.calls")" "-Pk $tmp"
+equals "the data root of a Docker that is not on a local socket is skipped" \
+  "$(docker_host=tcp://10.0.0.2:2376 disk; cat "$tmp/df.calls")" "-Pk $tmp"
+equals "a context that cannot be inspected skips the data root" "$(docker_host=fail disk; cat "$tmp/df.calls")" "-Pk $tmp"
 docker_root=/nonexistent/var/lib/docker
-equals "a data root inside Docker Desktop's VM is skipped" "$(disk; cat "$tmp/df.calls")" "-Pk $tmp"
+equals "a data root that is not on this host is skipped" "$(disk; cat "$tmp/df.calls")" "-Pk $tmp"
 docker_root=fail
 exits_2 "Docker that does not answer stops jig" "jig: Docker is not running" disk
 docker_root=/var/lib/docker home_kib=n/a

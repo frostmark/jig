@@ -14,9 +14,14 @@ jig_use_builder() {
   jig_builder_text="$(printable "$BUILDX_BUILDER"), the builder of the Docker context"
 }
 
+jig_df_awk='NR == 2 {
+  for (i = 5; i <= NF; i++)
+    if ($i ~ /^[0-9]+%$/ && $(i - 1) ~ /^[0-9]+$/ && $(i - 2) ~ /^[0-9]+$/ && $(i - 3) ~ /^[0-9]+$/) { print $(i - 1); exit }
+}'
+
 jig_free_kib() {
   local kib
-  kib="$(df -Pk "$1" 2>/dev/null | LC_ALL=C awk 'NR == 2 { print $4 }')" && [[ $kib =~ ^[0-9]+$ ]] || return 1
+  kib="$(df -Pk "$1" 2>/dev/null | LC_ALL=C awk "$jig_df_awk")" && [[ $kib =~ ^[0-9]+$ ]] || return 1
   printf '%s' "$kib"
 }
 
@@ -28,7 +33,7 @@ jig_check_free() {
 }
 
 jig_check_disk() {
-  local min="${JIG_MIN_FREE_GB:-20}" dir root
+  local min="${JIG_MIN_FREE_GB:-20}" dir info host root
   [[ $min =~ $jig_min_free_re ]] || jig_fail "JIG_MIN_FREE_GB must be a whole number of GiB (0 turns the check off)"
   [ "$min" != 0 ] || return 0
   dir="$jig_home"
@@ -36,7 +41,16 @@ jig_check_disk() {
     dir="$(dirname "$dir")"
   done
   jig_check_free "$dir" "the filesystem of JIG_HOME ($jig_home)" "$min"
-  root="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null)" || jig_fail "Docker is not running"
+  info="$(docker info --format '{{.OperatingSystem}}|{{.DockerRootDir}}' 2>/dev/null)" || jig_fail "Docker is not running"
+  host="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null)" || return 0
+  case "$host" in
+    unix://*) ;;
+    *) return 0 ;;
+  esac
+  case "$info" in
+    "Docker Desktop|"*) return 0 ;;
+  esac
+  root="${info#*|}"
   [ -n "$root" ] && [ -d "$root" ] || return 0
   jig_check_free "$root" "the filesystem of Docker's data root ($(printable "$root"))" "$min"
 }

@@ -499,10 +499,12 @@ value counts as unset, and an invalid one stops jig with code 2 before anything 
 
 Before it builds, `jig run` and `jig smoke` stop with code 2 when the filesystem that holds `JIG_HOME`
 (its nearest existing directory) has less free space than `JIG_MIN_FREE_GB` GiB: a whole number, 20 by
-default, 0 turns the check off, an empty value counts as unset. When Docker's data root
-(`docker info --format '{{.DockerRootDir}}'`) exists on the host, as with Docker Engine on Linux, its
-filesystem is checked too; Docker Desktop keeps it inside its VM, whose disk image lives on the host's
-disk. When the host's disk fills up, Docker Desktop's VM disk turns read-only and Docker needs a restart.
+default, 0 turns the check off, an empty value counts as unset. When the Docker context is a local unix
+socket, the daemon is not Docker Desktop and its data root (`docker info --format '{{.DockerRootDir}}'`)
+exists on the host, as with Docker Engine on Linux, that filesystem is checked too. The free space inside
+Docker Desktop's VM disk is not checked, nor a remote Docker's; Desktop's disk image lives on the host's
+disk, so the check of `JIG_HOME` covers it when both share a filesystem. When the host's disk fills up,
+Docker Desktop's VM disk turns read-only and Docker needs a restart.
 The message says how much is free; `docker system df` shows what Docker holds, and `docker builder prune`
 removes its build cache.
 
@@ -764,7 +766,7 @@ It also checks the host safety of `lib/build.sh` and `lib/common.sh`: the scan a
 credential and the build secrets (values with `:`, `/`, `&`, regex and glob characters, near misses,
 overlapping values, the JSON form, a stream redacted line by line as it comes), the build secrets read from
 the environment and removed from it, the builder of the Docker context or `BUILDX_BUILDER`, the disk check against a stand-in
-`df` and `docker`, reading `docker compose config` (a build secret's name in a service's environment, a
+`df` (names with spaces) and `docker` (Docker Desktop, a remote context), reading `docker compose config` (a build secret's name in a service's environment, a
 runtime secret or config that takes it, its value resolved anywhere, the value itself as it is or
 JSON-escaped, the services that build, jig's label
 file, the image names jig gives, which are valid Docker names whatever the owner, repository and
