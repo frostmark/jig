@@ -55,12 +55,15 @@ done
 github_repo https://github.com/Acme-Corp/My_Shop.v2.git Acme-Corp/My_Shop.v2
 github_repo git@github.com:Acme/Shop Acme/Shop
 github_repo https://github.com/acme/shop.git.git acme/shop.git
+github_repo https://github.com/acme/.github acme/.github
+github_repo git@github.com:acme/.gitignore.git acme/.gitignore
 for url in /srv/git/shop.git file:///srv/github.com/acme/shop.git https://gitlab.com/acme/shop.git \
   git@gitlab.com:acme/shop.git https://github.com.example.org/acme/shop https://example.org/github.com/acme/shop \
   mygithub.com:acme/shop https://notgithub.com/acme/shop https://github.com/acme https://github.com/acme/shop/tree/main \
   https://github.com/acme/shop.git/extra 'https://github.com/acme/sh op' 'https://github.com/acme/shop;id' \
   'https://github.com/acme/$(id)' https://github.com/../shop https://github.com/acme/.. https://github.com/./shop \
-  https://github.com/acme/.git ftp://github.com/acme/shop 'git@github.com:acme/shop:x' https://github.com//shop \
+  https://github.com/acme/.git https://github.com/acme/.git.git git@github.com:acme/.GIT.git git@github.com:acme/.Git \
+  https://github.com/.git/shop ftp://github.com/acme/shop 'git@github.com:acme/shop:x' https://github.com//shop \
   'git@github.com acme/shop' xssh://git@github.com/acme/shop /srv/github.com:acme/shop git@github.com:acme/shop/extra \
   "https://github.com/acme/shop
 https://github.com/acme/other" https://github.com/acme/shоp; do

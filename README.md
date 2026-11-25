@@ -19,7 +19,8 @@ repository's own instructions, the engine rules and your personal overlay (see [
    or `ssh://git@github.com/<owner>/<repo>`, with or without `.git`, a user, a port or a trailing `/`;
    the host may be in any case. Owner and name keep the URL's spelling, and they name the overlay
    directory, the run directories and the compose projects, so use GitHub's spelling, as its clone button
-   gives it. Any other `origin` stops jig with exit code 2 before anything runs. jig fetches from `origin`
+   gives it. Any other `origin`, and an owner or name of `.`, `..` or `.git` in any case (they would name
+   directories that are not the repository's), stops jig with exit code 2 before anything runs. jig fetches from `origin`
    and checks that `jig/<slug>` is not there yet with the host's git credentials. Its fetches update
    `origin/<base>` and never write `FETCH_HEAD`, so a `git pull` or `git merge FETCH_HEAD` of yours is not
    redirected by a run.

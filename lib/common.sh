@@ -70,7 +70,10 @@ jig_github_repo() {
   [ "$(printf '%s' "$host" | tr 'A-Z' 'a-z')" = github.com ] || return 1
   name="${name%.git}"
   for part in "$owner" "$name"; do
-    [[ $part =~ $part_re ]] && [ "$part" != . ] && [ "$part" != .. ] || return 1
+    [[ $part =~ $part_re ]] || return 1
+    case "$part" in
+      . | .. | .[Gg][Ii][Tt]) return 1 ;;
+    esac
   done
   printf '%s/%s' "$owner" "$name"
 }
