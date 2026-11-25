@@ -19,6 +19,7 @@ finish() {
   trap '' INT TERM HUP
   set +e
   jig_down || [ "$status" -ne 0 ] || status=1
+  [ ! -f "$run/build.log" ] || jig_redact_files "$run" build.log
   echo "$jig_name: smoke exit $status after $(( $(date +%s) - started ))s"
   exit "$status"
 }
@@ -26,11 +27,13 @@ finish() {
 rm -rf "$run"
 mkdir -p "$run"
 jig_extract_profile "$head" "$run"
+jig_use_workspace "$run/repo" "$head"
+jig_check_compose "$run" || jig_fail "$jig_compose_problem"
 jig_clone "$head" "$run/repo"
 
-jig_use_workspace "$run/repo" "$head"
 trap finish EXIT
-jig_compose up -d --build --wait
+jig_build "$run/build.log"
+jig_compose up -d --wait --no-build
 jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_setup")"
 jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_verify")"
 

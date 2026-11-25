@@ -175,13 +175,18 @@ echo "$jig_name: issue: $issue_text"
 jig_warn jig_issue_warnings
 jig_use_harness "$run/compose.harness.yml" "$run/system-prompt.md" "$run/plan.md" ||
   die "could not write the harness files into $run"
+jig_use_workspace "$run/repo" "$base"
+if ! jig_check_compose "$run"; then
+  rm -rf "$run"
+  jig_fail "$jig_compose_problem"
+fi
 jig_clone "$base" "$run/repo" || die "git clone failed"
 
-jig_use_workspace "$run/repo" "$base"
 trap finish EXIT
 
 echo "$jig_name: starting compose project $jig_project"
-jig_compose up -d --build --wait || die "docker compose up failed"
+jig_build "$run/build.log" || die "docker compose build failed: see $run/build.log"
+jig_compose up -d --wait --no-build || die "docker compose up failed"
 
 jig_compose exec -T app git switch -q -c "$branch" || die "could not create $branch in the container"
 

@@ -1,4 +1,6 @@
 jig_min_free_re='^(0|[1-9][0-9]{0,5})$'
+jig_build_services=()
+jig_compose_problem=""
 
 jig_use_builder() {
   if [ -n "${BUILDX_BUILDER:-}" ]; then
@@ -48,4 +50,110 @@ jig_read_build_secrets() {
       jig_fail "the value of the build secret $name has a line break or another control character, which jig cannot look for in its logs"
     jig_add_secret "$name" "$value"
   done
+}
+
+jig_build_secret_marker() {
+  printf 'jig_build_secret_marker_%s' "$1"
+}
+
+jig_is_build_secret() {
+  local name
+  for name in ${profile_build_secrets[@]+"${profile_build_secrets[@]}"}; do
+    [ "$name" != "$1" ] || return 0
+  done
+  return 1
+}
+
+jig_compose_facts_awk='$0 == "  \"services\": {" { inside = 1; found = 1; next }
+inside && /^  }/ { inside = 0; next }
+!inside { next }
+/^    "[A-Za-z0-9._-]+": \{$/ { svc = $0; sub(/^    "/, "", svc); sub(/": \{$/, "", svc); env = 0; print "service " svc; next }
+/^    [^ }]/ { bad = 1; next }
+/^      "build": \{/ { print "build " svc; next }
+$0 == "      \"environment\": {" { env = 1; next }
+env && /^      }/ { env = 0; next }
+env && /^        "[^"\\]+": / { key = $0; sub(/^        "/, "", key); sub(/": .*$/, "", key); print "env " svc " " key }
+END { if (!found || bad) exit 1 }'
+
+jig_write_build_compose() {
+  local service
+  {
+    echo "services:"
+    for service in "${jig_build_services[@]}"; do
+      echo "  \"$service\":"
+      echo "    build:"
+      echo "      labels:"
+      echo "        jig.repo: \"$gh_repo\""
+    done
+  } >"$1"
+}
+
+jig_check_compose() {
+  local dir="$1" config facts kind service name app=0
+  jig_build_services=()
+  jig_compose_problem=""
+  config="$(
+    for name in ${profile_build_secrets[@]+"${profile_build_secrets[@]}"}; do
+      export "$name=$(jig_build_secret_marker "$name")"
+    done
+    jig_compose config --format json
+  )" || {
+    jig_compose_problem="docker compose config failed on the profile's compose files and jig's"
+    return 1
+  }
+  facts="$(printf '%s\n' "$config" | LC_ALL=C awk "$jig_compose_facts_awk")" || {
+    jig_compose_problem="could not read the services from docker compose config --format json"
+    return 1
+  }
+  while IFS=' ' read -r kind service name; do
+    case "$kind" in
+      service) [ "$service" != app ] || app=1 ;;
+      build) jig_build_services+=("$service") ;;
+      env)
+        if jig_is_build_secret "$name"; then
+          jig_compose_problem="the build secret $name is in the environment of the service $service (docker compose config): jig never passes a build secret into a container. Remove it from the service's environment and env_file; the build gets it from a top-level secret with environment: $name"
+          return 1
+        fi ;;
+    esac
+  done <<<"$facts"
+  [ "$app" = 1 ] || {
+    jig_compose_problem="docker compose config shows no service app"
+    return 1
+  }
+  for name in ${profile_build_secrets[@]+"${profile_build_secrets[@]}"}; do
+    case "$config" in
+      *"$(jig_build_secret_marker "$name")"*)
+        jig_compose_problem="the value of the build secret $name reaches the compose project (docker compose config resolves \${$name} in it: in an environment value, a build arg, a label or elsewhere): jig never passes a build secret into a container. The build gets it from a top-level secret with environment: $name"
+        return 1 ;;
+    esac
+  done
+  [ "${#jig_build_services[@]}" -gt 0 ] || return 0
+  jig_write_build_compose "$dir/compose.build.yml" || {
+    jig_compose_problem="could not write $dir/compose.build.yml"
+    return 1
+  }
+  jig_compose_files+=(-f "$dir/compose.build.yml")
+}
+
+jig_prune_images() {
+  local log="$1" out
+  if ! out="$(docker image prune -f --filter "label=jig.repo=$gh_repo" 2>&1)"; then
+    printf '%s\n' "$out" >>"$log"
+    echo "$jig_name: WARNING: could not remove the dangling images of $gh_repo (docker image prune): see $log" >&2
+    return 0
+  fi
+  printf '%s\n' "$out" >>"$log"
+  case "$out" in
+    *"Deleted Images:"*)
+      echo "$jig_name: removed the dangling images labelled jig.repo=$gh_repo ($(printf '%s\n' "$out" | sed -n 's/^Total reclaimed space: /reclaimed /p'))" ;;
+  esac
+}
+
+jig_build() {
+  local log="$1" status=0
+  [ "${#jig_build_services[@]}" -gt 0 ] || return 0
+  echo "$jig_name: building ${jig_build_services[*]} with $jig_builder_text (log: $log)"
+  jig_compose build 2>&1 | jig_redact_stream | tee "$log" || status=$?
+  [ "$status" = 0 ] || return "$status"
+  jig_prune_images "$log"
 }

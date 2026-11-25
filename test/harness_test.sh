@@ -1031,5 +1031,189 @@ docker_root=/var/lib/docker home_kib=n/a
 exits_2 "df output without a number stops jig" "jig: could not read the free space of the filesystem of JIG_HOME ($tmp/home/.jig) (df -Pk $tmp)" disk
 unset -f df
 
+mkdir "$tmp/compose"
+cat >"$tmp/compose/build.json" <<'EOF'
+{
+  "name": "jig-run_acme_shop_x",
+  "networks": {
+    "default": {
+      "name": "jig-run_acme_shop_x_default",
+      "ipam": {}
+    }
+  },
+  "secrets": {
+    "E2E_SECRET": {
+      "name": "jig-run_acme_shop_x_E2E_SECRET",
+      "environment": "E2E_SECRET"
+    }
+  },
+  "services": {
+    "app": {
+      "build": {
+        "context": "/srv/profile/.jig",
+        "dockerfile": "Dockerfile",
+        "args": {
+          "E2E_SECRET": "uid"
+        },
+        "labels": {
+          "E2E_SECRET": "label"
+        },
+        "secrets": [
+          {
+            "source": "E2E_SECRET"
+          }
+        ]
+      },
+      "command": [
+        "sleep",
+        "infinity"
+      ],
+      "environment": {
+        "E2E_OTHER": "x",
+        "HOME": "/tmp",
+        "JIG_BASE": "0123"
+      },
+      "image": "acme-shop-jig",
+      "networks": {
+        "default": null
+      }
+    },
+    "db.1": {
+      "environment": {}
+    },
+    "worker": {
+      "build": {
+        "context": "/srv/profile/.jig"
+      },
+      "environment": {
+        "MULTI": "a\nb \"E2E_SECRET\": x"
+      }
+    }
+  }
+}
+EOF
+sed 's/"HOME": "\/tmp",/"E2E_SECRET": "@E2E_SECRET@",\
+        "HOME": "\/tmp",/' "$tmp/compose/build.json" >"$tmp/compose/env_name.json"
+sed 's/"HOME": "\/tmp",/"TOKEN": "x@E2E_SECRET@y",/' "$tmp/compose/build.json" >"$tmp/compose/env_value.json"
+sed 's/"E2E_SECRET": "uid"/"UID": "@E2E_SECRET@"/' "$tmp/compose/build.json" >"$tmp/compose/arg_value.json"
+sed '/"worker": {/,/^    }$/d; s/^    "db.1": {/    "worker": {/; /^      "build": {/,/^      },$/d' "$tmp/compose/build.json" >"$tmp/compose/no_build.json"
+sed 's/"app": {/"web": {/' "$tmp/compose/build.json" >"$tmp/compose/no_app.json"
+sed 's/"db.1": {/"db 1": {/' "$tmp/compose/build.json" >"$tmp/compose/bad_name.json"
+sed 's/"services": {/"services":{/' "$tmp/compose/build.json" >"$tmp/compose/no_services.json"
+docker() {
+  printf '%s|E2E_SECRET=%s\n' "$*" "${E2E_SECRET-unset}" >>"$tmp/docker.calls"
+  case "$1 ${*: -3}" in
+    "compose config --format json")
+      [ "$fixture" != fail ] || return 1
+      config_text="$(cat "$tmp/compose/$fixture.json")"
+      printf '%s\n' "${config_text//@E2E_SECRET@/${E2E_SECRET-}}" ;;
+    *) return 1 ;;
+  esac
+}
+inspect() {
+  rm -f "$tmp/docker.calls" "$tmp/compose/compose.build.yml"
+  (
+    jig_project=jig-run_acme_shop_x gh_repo=acme/shop
+    jig_compose_files=(-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml)
+    profile_build_secrets=(E2E_SECRET E2E_KEY)
+    export E2E_SECRET='real:value/&' E2E_KEY=real-key
+    if jig_check_compose "$tmp/compose"; then
+      printf 'ok|%s|%s' "${jig_build_services[*]-}" "${jig_compose_files[*]}"
+    else
+      printf 'refused|%s' "$jig_compose_problem"
+    fi
+  ) 2>&1
+}
+fixture=build
+equals "services that build are found and get jig's label file" "$(inspect)" \
+  "ok|app worker|-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml -f $tmp/compose/compose.build.yml"
+equals "the config is read with markers in place of the build secrets' values" "$(cat "$tmp/docker.calls")" \
+  "compose -p jig-run_acme_shop_x -f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml config --format json|E2E_SECRET=jig_build_secret_marker_E2E_SECRET"
+equals "the label file labels each service that builds with the repository" "$(cat "$tmp/compose/compose.build.yml")" 'services:
+  "app":
+    build:
+      labels:
+        jig.repo: "acme/shop"
+  "worker":
+    build:
+      labels:
+        jig.repo: "acme/shop"'
+fixture=no_build
+equals "without a service that builds there is no label file" "$(inspect; [ -e "$tmp/compose/compose.build.yml" ] && echo ' file')" \
+  "ok||-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml"
+fixture=env_name
+equals "a build secret's name in a service's environment is refused" "$(inspect)" \
+  "refused|the build secret E2E_SECRET is in the environment of the service app (docker compose config): jig never passes a build secret into a container. Remove it from the service's environment and env_file; the build gets it from a top-level secret with environment: E2E_SECRET"
+fixture=env_value
+equals "a build secret's value in another variable is refused" "$(inspect)" \
+  "refused|the value of the build secret E2E_SECRET reaches the compose project (docker compose config resolves \${E2E_SECRET} in it: in an environment value, a build arg, a label or elsewhere): jig never passes a build secret into a container. The build gets it from a top-level secret with environment: E2E_SECRET"
+fixture=arg_value
+equals "a build secret's value in a build arg is refused" "$(inspect | cut -d: -f1)" \
+  "refused|the value of the build secret E2E_SECRET reaches the compose project (docker compose config resolves \${E2E_SECRET} in it"
+fixture=no_app
+equals "a project without the app service is refused" "$(inspect)" "refused|docker compose config shows no service app"
+fixture=bad_name
+equals "a service name out of shape is refused" "$(inspect)" "refused|could not read the services from docker compose config --format json"
+fixture=no_services
+equals "a config without the services block is refused" "$(inspect)" "refused|could not read the services from docker compose config --format json"
+fixture=fail
+equals "a failing docker compose config is refused" "$(inspect)" "refused|docker compose config failed on the profile's compose files and jig's"
+unset fixture config_text
+
+docker() {
+  printf '%s\n' "$*" >>"$tmp/docker.calls"
+  case "$1 $2" in
+    "compose -p")
+      printf 'build step 1\nbuild sees %s\n' "$secret"
+      return "$build_status" ;;
+    "image prune")
+      [ "$prune" != fail ] || { echo "prune failed"; return 1; }
+      [ "$prune" = none ] || printf 'Deleted Images:\ndeleted: sha256:0123\n\n'
+      echo "Total reclaimed space: 1.5MB" ;;
+    *) return 1 ;;
+  esac
+}
+build() {
+  rm -f "$tmp/docker.calls" "$tmp/compose/build.log"
+  (
+    jig_project=jig-run_acme_shop_x gh_repo=acme/shop jig_builder_text="desktop-linux, the builder of the Docker context"
+    jig_compose_files=(-f /srv/compose.yml)
+    jig_secret_names=(NPM_TOKEN) jig_secret_values=("$secret")
+    jig_build_services=("$@")
+    jig_build "$tmp/compose/build.log"
+    echo "status $?"
+  ) 2>&1
+}
+build_status=0 prune=some
+equals "the build runs with the redacted output on the terminal, then prunes" "$(build app worker)" \
+  "jig: building app worker with desktop-linux, the builder of the Docker context (log: $tmp/compose/build.log)
+build step 1
+build sees [REDACTED]
+jig: removed the dangling images labelled jig.repo=acme/shop (reclaimed 1.5MB)
+status 0"
+equals "docker builds the project and prunes only the repository's dangling images" "$(cat "$tmp/docker.calls")" \
+  "compose -p jig-run_acme_shop_x -f /srv/compose.yml build
+image prune -f --filter label=jig.repo=acme/shop"
+equals "build.log has the redacted build output and the prune output" "$(cat "$tmp/compose/build.log")" "build step 1
+build sees [REDACTED]
+Deleted Images:
+deleted: sha256:0123
+
+Total reclaimed space: 1.5MB"
+equals "without a service that builds nothing runs and no build.log is written" \
+  "$(build; cat "$tmp/docker.calls" 2>/dev/null; [ -e "$tmp/compose/build.log" ] && echo log)" "status 0"
+prune=none
+equals "a prune that removes nothing is not announced" "$(build app | sed -n '4,$p')" "status 0"
+prune=fail
+equals "a failing prune is a warning" "$(build app | sed -n '4,$p')" \
+  "jig: WARNING: could not remove the dangling images of acme/shop (docker image prune): see $tmp/compose/build.log
+status 0"
+equals "the prune's error is in build.log" "$(tail -n 1 "$tmp/compose/build.log")" "prune failed"
+build_status=17 prune=some
+equals "a failing build returns its code and prunes nothing" "$(build app | tail -n 1; cat "$tmp/docker.calls")" "status 17
+compose -p jig-run_acme_shop_x -f /srv/compose.yml build"
+unset -f docker
+unset build_status prune
+
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]
