@@ -230,6 +230,30 @@ equals "only an effort from the profile" "$(agent_options "" medium unset unset)
 equals "empty JIG_MODEL and JIG_EFFORT leave the profile's values" "$(agent_options opus high "" "")" \
   "--model opus --effort high|model: opus (from the profile), effort: high (from the profile)"
 
+report() {
+  (
+    profile_model="$1" profile_effort="$2"
+    unset JIG_MODEL JIG_EFFORT
+    [ "$3" = unset ] || export JIG_MODEL="$3"
+    jig_agent_options && jig_agent_report "$4" "$5"
+  ) 2>&1
+}
+meta='success, turns: 3, estimated cost $0.01'
+equals "the model from the log next to turns and cost, with Claude Code's defaults" \
+  "$(report "" "" unset "$meta" claude-sonnet-5-5)" \
+  "$meta, model: claude-sonnet-5-5 (default), effort: default"
+equals "an alias from the profile and the model the log names" "$(report opus high unset "$meta" claude-opus-5-5)" \
+  "$meta, model: claude-opus-5-5 (opus from the profile), effort: high (from the profile)"
+equals "a model name that the log confirms is named once" "$(report "" "" claude-opus-5-5 "$meta" claude-opus-5-5)" \
+  "$meta, model: claude-opus-5-5 (from JIG_MODEL), effort: default"
+equals "the other models in the log follow the main one" \
+  "$(report "" "" unset "$meta" "claude-opus-5-5 claude-haiku-5 claude-fake-2")" \
+  "$meta, model: claude-opus-5-5 (default), also claude-haiku-5 and claude-fake-2, effort: default"
+equals "a log without a result or a model" "$(report opus "" unset "" "")" \
+  "model: unknown (opus from the profile), effort: default"
+equals "a log with a result and no model" "$(report "" low unset "$meta" "")" \
+  "$meta, model: unknown (default), effort: low (from the profile)"
+
 repo_root="$tmp/repo"
 git init -q -b main "$repo_root"
 mkdir -p "$repo_root/.claude/skills/review" "$repo_root/.claude/skills/lint" "$repo_root/.claude/agents"

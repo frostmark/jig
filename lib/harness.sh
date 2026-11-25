@@ -158,6 +158,26 @@ jig_agent_settings() {
   printf 'model: %s, effort: %s' "$(jig_setting "$jig_model" "$jig_model_source")" "$(jig_setting "$jig_effort" "$jig_effort_source")"
 }
 
+# $1: the outcome, turns and cost from the agent's log, or nothing; $2: the models in the log, the main one first.
+jig_agent_report() {
+  local meta="$1" models="$2" main others text
+  main="${models%% *}"
+  others=""
+  [ "$models" = "$main" ] || others="${models#* }"
+  [ -n "$main" ] || main=unknown
+  if [ -z "$jig_model" ]; then
+    text="model: $main (default)"
+  elif [ "$jig_model" = "$main" ]; then
+    text="model: $main (from $jig_model_source)"
+  else
+    text="model: $main ($jig_model from $jig_model_source)"
+  fi
+  [ -z "$others" ] || text="$text, also ${others// / and }"
+  text="$text, effort: $(jig_setting "$jig_effort" "$jig_effort_source")"
+  [ -z "$meta" ] || text="$meta, $text"
+  printf '%s' "$text"
+}
+
 jig_use_harness() {
   local compose_file="$1" prompt_file="$2" plan_file="$3"
   jig_write_system_prompt "$prompt_file" || return 1

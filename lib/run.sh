@@ -15,6 +15,7 @@ branch="jig/$slug"
 minutes="${JIG_TIMEOUT:-60}"
 [[ $minutes =~ $minutes_re ]] || jig_fail "JIG_TIMEOUT must be a positive whole number of minutes"
 jig_check_agent_env
+extract_js="$(cat "$engine_root/lib/agent-log.js")" || jig_fail "could not read $engine_root/lib/agent-log.js"
 jig_set_home
 jig_set_profiles
 
@@ -239,30 +240,21 @@ if [ "$commits" != 0 ]; then
   echo "$jig_name: $profile_verify exit $verify_status"
 fi
 
-extract_js='
-let r = null;
-for (const line of require("fs").readFileSync(0, "utf8").split("\n")) {
-  if (!line.startsWith("{")) continue;
-  try { const m = JSON.parse(line); if (m && m.type === "result") r = m; } catch (e) {}
-}
-if (!r) process.exit(1);
-if (process.argv[1] === "meta") {
-  const cost = typeof r.total_cost_usd === "number" ? `, estimated cost $${r.total_cost_usd.toFixed(2)}` : "";
-  const outcome = r.is_error ? `error (${r.subtype})` : r.subtype;
-  process.stdout.write(`${outcome}, turns: ${r.num_turns}${cost}`);
-} else {
-  process.stdout.write(typeof r.result === "string" ? r.result : "");
-}'
 extract_status=0
 jig_compose exec -T app node -e "$extract_js" summary <"$run/claude.log" >"$run/summary.md" 2>/dev/null ||
   extract_status=$?
 [ "$extract_status" != 130 ] || exit 130
 [ "$extract_status" = 0 ] || : >"$run/summary.md"
 extract_status=0
-agent_meta="$(jig_compose exec -T app node -e "$extract_js" meta <"$run/claude.log" 2>/dev/null)" ||
+agent_log="$(jig_compose exec -T app node -e "$extract_js" meta <"$run/claude.log" 2>/dev/null)" ||
   extract_status=$?
 [ "$extract_status" != 130 ] || exit 130
-[ "$extract_status" = 0 ] || agent_meta=""
+[ "$extract_status" = 0 ] || agent_log=""
+agent_meta="${agent_log%%$'\n'*}"
+agent_models=""
+[ "$agent_log" = "$agent_meta" ] || agent_models="${agent_log#*$'\n'}"
+agent_report="$(jig_agent_report "$agent_meta" "$agent_models")"
+echo "$jig_name: agent: $agent_report"
 
 teardown || die "docker compose down failed: remove project $jig_project by hand"
 [ "$jig_interrupted" = 0 ] || exit 130
@@ -271,7 +263,6 @@ remove_clone
 
 if [ "$commits" = 0 ]; then
   [ "$timed_out" = 0 ] || echo "$jig_name: the agent hit JIG_TIMEOUT=$minutes min and was stopped"
-  [ -z "$agent_meta" ] || echo "$jig_name: agent: $agent_meta"
   ! grep -q 'JIG_BLOCKED\.md$' "$run/status.txt" ||
     echo "$jig_name: the agent left JIG_BLOCKED.md uncommitted: see $run/blocked-worktree.md"
   [ ! -s "$run/status.txt" ] || echo "$jig_name: uncommitted changes were left in the clone: see $run/status.txt"
@@ -390,8 +381,7 @@ summary="$(jig_pr_excerpt "$jig_pr_summary_max" "$run/summary.md" '' "
 *The summary is cut here: the whole message is in \`$run_shown/summary.md\`.*")" || die "could not read $run/summary.md"
 [ -n "$summary" ] || summary="(the agent left no final message: see \`$run_shown/claude.log\`)"
 if [ "$verify_status" = 0 ]; then verify_text="green"; else verify_text="red (exit $verify_status)"; fi
-agent_text="exit $agent_status"
-[ -z "$agent_meta" ] || agent_text="$agent_text, $agent_meta"
+agent_text="exit $agent_status, $agent_report"
 
 body="$run/pr-body.md"
 pr_top="$(
