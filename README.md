@@ -347,7 +347,7 @@ jig holds the whole description within 65,536 bytes, which is never more charact
 of 65,536 characters:
 
 - the agent's final message is cut at 40,000 bytes, `JIG_BLOCKED.md` at 10,000 bytes once quoted, and
-  each line of the uncommitted-changes and protected-paths lists at 200 bytes (ending in `...`);
+  each entry of the uncommitted-changes and protected-paths lists at 200 bytes (ending in `...`);
 - the plan takes the room that is left. A cut plan keeps the whole lines that fit, the block is titled
   "Plan (cut)" and ends with the plan's size and the path of the whole copy;
 - if even the plan's note does not fit, the description is cut before it and says so.
