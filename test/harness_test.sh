@@ -308,7 +308,7 @@ for n in a b c d e f g h i j k l m n o p q r s t; do
   printf 'line %s \342\206\222\n' "$n"
 done >"$tmp/run/plan.md"
 cut_at() {
-  (jig_pr_body_max=$1 && jig_pr_body "$tmp/run/plan.md" copy.md top end) 2>&1
+  (export LC_ALL="${utf8:-C}" && jig_pr_body_max=$1 && jig_pr_body "$tmp/run/plan.md" copy.md top end) 2>&1
 }
 equals "a cut plan keeps the whole lines that fit and names its copy" "$(cut_at 186)" 'top
 
@@ -366,7 +366,7 @@ echo 16'
 
 head_lines="$(for n in $(seq -w 1 20); do echo "line $n"; done)"
 equals "a head that leaves no room for the plan's note is cut after its last whole line that fits" \
-  "$( (jig_pr_body_max=218 && jig_pr_body "$tmp/run/plan.md" copy.md "$head_lines" end) 2>&1)" 'line 01
+  "$( (export LC_ALL="${utf8:-C}" && jig_pr_body_max=218 && jig_pr_body "$tmp/run/plan.md" copy.md "$head_lines" end) 2>&1)" 'line 01
 line 02
 line 03
 
@@ -380,9 +380,9 @@ line 03
 
 end'
 equals "the cut head fills the limit exactly" \
-  "$( (jig_pr_body_max=218 && jig_pr_body "$tmp/run/plan.md" copy.md "$head_lines" end | bytes) 2>&1)" 218
+  "$( (export LC_ALL="${utf8:-C}" && jig_pr_body_max=218 && jig_pr_body "$tmp/run/plan.md" copy.md "$head_lines" end | bytes) 2>&1)" 218
 equals "a head line that would pass the limit by one byte is left out" \
-  "$( (jig_pr_body_max=217 && jig_pr_body "$tmp/run/plan.md" copy.md "$head_lines" end | sed -n 1,4p) 2>&1)" 'line 01
+  "$( (export LC_ALL="${utf8:-C}" && jig_pr_body_max=217 && jig_pr_body "$tmp/run/plan.md" copy.md "$head_lines" end | sed -n 1,4p) 2>&1)" 'line 01
 line 02
 
 *The description is cut here to stay within GitHub'"'"'s limit.*'

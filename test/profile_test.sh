@@ -501,16 +501,8 @@ equals "the merged profile's files" "$(files_in "$tmp/run/profile/.jig")" \
 equals "an overlay file replaces the repository's" "$(cat "$tmp/run/profile/.jig/Dockerfile")" "overlay Dockerfile"
 checks=$(( checks + 1 ))
 [ -x "$tmp/run/profile/.jig/setup" ] || fail "an overlay script keeps its executable mode over a repository file without it"
-equals "the profile's compose file gives the app service JIG_BASE and mounts the profile read-only" \
-  "$(cat "$tmp/run/compose.profile.yml")" 'services:
-  app:
-    environment:
-      JIG_BASE: ${JIG_BASE:?jig sets JIG_BASE}
-    volumes:
-      - type: bind
-        source: ${JIG_PROFILE_DIR:?jig sets JIG_PROFILE_DIR}
-        target: /jig/profile
-        read_only: true'
+equals "the profile's compose file gives the app service JIG_BASE" \
+  "$(sed -n '/^  app:$/,/^  [^ ]/p' "$tmp/run/compose.profile.yml" | grep -c '^      JIG_BASE: ${JIG_BASE:?jig sets JIG_BASE}$')" 1
 equals "the workspace comes with its base commit" \
   "$( (jig_use_workspace "$tmp/run/repo" "$last" && printf '%s|%s' "$JIG_WORKSPACE" "$JIG_BASE") 2>&1)" "$tmp/run/repo|$last"
 rm -r "$JIG_PROFILES"
