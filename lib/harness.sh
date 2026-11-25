@@ -12,7 +12,27 @@ jig_set_profiles() {
   esac
 }
 
+jig_overlay_spelling() {
+  local dir="$overlay_root" part entry exact other
+  for part in "$gh_owner" "$gh_name"; do
+    [ -d "$dir" ] || return 0
+    exact=0
+    other=""
+    while IFS= read -r -d '' entry; do
+      entry="${entry##*/}"
+      if [ "$entry" = "$part" ]; then exact=1; else other="$entry"; fi
+    done < <(find -H "$dir" -mindepth 1 -maxdepth 1 -iname "$part" -print0)
+    if [ "$exact" = 0 ]; then
+      [ -z "$other" ] ||
+        jig_fail "the overlay directory is spelled $(printable "$dir/$other"), but the origin URL ($gh_owner/$gh_name) makes jig look for $dir/$part: give both GitHub's spelling (rename the directory, or set origin with git remote set-url)"
+      return 0
+    fi
+    dir="$dir/$part"
+  done
+}
+
 jig_find_overlay() {
+  jig_overlay_spelling
   overlay_dir="$overlay_root/$gh_owner/$gh_name"
   overlay_rules=""
   overlay_plugin=""

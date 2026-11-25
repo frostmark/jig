@@ -188,6 +188,26 @@ ln -s "$tmp/missing" "$overlay"
 exits_2 "the repository's overlay is a dangling link" "the overlay $overlay must be a directory" find_in "$profiles"
 rm "$overlay"
 
+mkdir "$profiles/acme/Shop"
+exits_2 "an overlay directory whose name differs from the origin URL's only in case stops jig on any filesystem" \
+  "jig: the overlay directory is spelled $profiles/acme/Shop, but the origin URL (acme/shop) makes jig look for $profiles/acme/shop: give both GitHub's spelling (rename the directory, or set origin with git remote set-url)" \
+  find_in "$profiles"
+rmdir "$profiles/acme/Shop"
+mv "$profiles/acme" "$profiles/ACME"
+mkdir "$profiles/ACME/shop"
+exits_2 "an owner directory that differs only in case stops jig" \
+  "jig: the overlay directory is spelled $profiles/ACME, but the origin URL (acme/shop) makes jig look for $profiles/acme:" \
+  find_in "$profiles"
+mv "$profiles/ACME" "$tmp/acme-overlays"
+ln -s "$tmp/acme-overlays" "$profiles/acme"
+mkdir "$tmp/acme-overlays/shop-old" "$tmp/acme-overlays/shop.d"
+: >"$tmp/acme-overlays/shop/rules.md"
+equals "an owner directory that is a link is looked into, and names that only start with the repository's do not count" \
+  "$(found "$profiles")" "$overlay|$overlay/rules.md|"
+rm "$profiles/acme"
+rm -r "$tmp/acme-overlays"
+mkdir "$profiles/acme"
+
 jig_parse_profile cfg <<<"base main
 setup .jig/setup
 verify bin/verify

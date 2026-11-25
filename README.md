@@ -288,7 +288,10 @@ The overlay holds harness and profile files you are trying out before they move 
 (profile files: see [Profile files from the overlay](#profile-files-from-the-overlay)). Its root is
 `JIG_PROFILES` (an absolute path, `$JIG_HOME/profiles` by default, so `~/.jig/profiles`); keep it as a
 private git repository of its own. Each target repository has a directory `<owner>/<repo>/` there, named
-like its run directories (the owner and name from the URL of `origin`, see [Install](#install)):
+like its run directories (the owner and name from the URL of `origin`, see [Install](#install)) and
+spelled exactly so: an owner or repository directory that differs only in case stops `jig run` and
+`jig smoke` with exit code 2 and both spellings, on any filesystem, rather than being used on a
+case-insensitive disk and silently skipped on a case-sensitive one:
 
 ```
 ~/.jig/profiles/
