@@ -42,6 +42,74 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
 
+github_repo() {
+  equals "$1 names $2" "$(jig_github_repo "$1" || echo refused)" "$2"
+}
+for url in https://github.com/acme/shop.git https://github.com/acme/shop https://github.com/acme/shop/ \
+  https://github.com/acme/shop.git/ http://github.com/acme/shop git://github.com/acme/shop.git \
+  https://user:x-token@github.com/acme/shop.git https://github.com:443/acme/shop https://GitHub.COM/acme/shop \
+  git@github.com:acme/shop.git git@github.com:acme/shop github.com:acme/shop.git git@github.com:/acme/shop.git \
+  ssh://git@github.com/acme/shop.git ssh://git@github.com:22/acme/shop ssh://github.com/acme/shop/; do
+  github_repo "$url" acme/shop
+done
+github_repo https://github.com/Acme-Corp/My_Shop.v2.git Acme-Corp/My_Shop.v2
+github_repo git@github.com:Acme/Shop Acme/Shop
+github_repo https://github.com/acme/shop.git.git acme/shop.git
+for url in /srv/git/shop.git file:///srv/github.com/acme/shop.git https://gitlab.com/acme/shop.git \
+  git@gitlab.com:acme/shop.git https://github.com.example.org/acme/shop https://example.org/github.com/acme/shop \
+  mygithub.com:acme/shop https://notgithub.com/acme/shop https://github.com/acme https://github.com/acme/shop/tree/main \
+  https://github.com/acme/shop.git/extra 'https://github.com/acme/sh op' 'https://github.com/acme/shop;id' \
+  'https://github.com/acme/$(id)' https://github.com/../shop https://github.com/acme/.. https://github.com/./shop \
+  https://github.com/acme/.git ftp://github.com/acme/shop 'git@github.com:acme/shop:x' https://github.com//shop \
+  'git@github.com acme/shop' "https://github.com/acme/shop
+https://github.com/acme/other" https://github.com/acme/shоp; do
+  github_repo "$url" refused
+done
+
+git init -q "$tmp/identity"
+git -C "$tmp/identity" remote add origin git@github.com:Acme/My.Shop.git
+identity() {
+  (repo_root="$tmp/identity" && jig_repo_identity && printf '%s|%s|%s|%s|%s' "$origin_url" "$gh_repo" "$gh_owner" "$gh_name" "$docker_repo") 2>&1
+}
+equals "the identity keeps the origin URL's case, and the docker name is lowercased" "$(identity)" \
+  "git@github.com:Acme/My.Shop.git|Acme/My.Shop|Acme|My.Shop|acme_my-shop"
+git -C "$tmp/identity" remote set-url origin https://user:e2e0secret0value@gitlab.com/acme/shop.git
+exits_2 "an origin that is not on GitHub stops jig and names the accepted forms" \
+  "jig: the origin remote of $tmp/identity is not a GitHub repository URL; jig takes <owner>/<repo> from https://github.com/<owner>/<repo>, git@github.com:<owner>/<repo> or ssh://git@github.com/<owner>/<repo>, with or without .git" \
+  identity
+equals "the refused origin URL is not printed" "$(identity | grep -c e2e0secret0value)" 0
+git -C "$tmp/identity" remote remove origin
+exits_2 "a checkout without origin stops jig" "jig: $tmp/identity has no remote origin" identity
+
+gh() {
+  printf '%s\n' "$*" >>"$tmp/gh.calls"
+  case "$1 $2" in
+    "auth status") [ "$gh_auth" = ok ] ;;
+    "repo view") [ "$gh_view" != fail ] && echo "$gh_view" ;;
+    *) return 1 ;;
+  esac
+}
+check_gh() {
+  rm -f "$tmp/gh.calls"
+  (origin_url=git@github.com:acme/shop.git gh_repo=acme/shop repo_root=/src/shop && jig_check_gh) 2>&1
+}
+gh_auth=ok gh_view=acme/shop
+equals "gh that names the parsed repository passes" "$(check_gh)" ""
+equals "gh is asked about github.com and the origin URL" "$(cat "$tmp/gh.calls")" "auth status --hostname github.com
+repo view git@github.com:acme/shop.git --json nameWithOwner --jq .nameWithOwner"
+gh_auth=no
+exits_2 "pr delivery needs gh logged in" \
+  "jig: gh is not logged in to github.com: run gh auth login (deliver pr opens the PR with gh; deliver branch needs no gh)" check_gh
+gh_auth=ok gh_view=fail
+exits_2 "a failing gh repo view stops jig" "jig: gh repo view failed for the origin remote of /src/shop" check_gh
+gh_view=Acme/shop
+exits_2 "GitHub's spelling must be the origin URL's" \
+  "jig: the origin URL of /src/shop names the repository acme/shop, but GitHub names it Acme/shop: set origin to GitHub's spelling (git -C /src/shop remote set-url origin <URL>), which also names the overlay and the run directories" \
+  check_gh
+gh_view=acme/shop-old
+exits_2 "a renamed repository's old URL stops jig" "but GitHub names it acme/shop-old" check_gh
+unset -f gh
+
 gh_owner=acme
 gh_name=shop
 jig_home="$tmp/home"

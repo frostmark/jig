@@ -173,6 +173,7 @@ fi
 
 cat >"$tmp/bin/gh" <<'EOF'
 #!/bin/sh
+printf '%s\n' "$*" >>"$FAKE_GH_DIR/calls"
 case "$1 $2" in
   "auth status") exit 0 ;;
   "repo view") echo acme/shop; exit 0 ;;
@@ -191,21 +192,27 @@ esac
 echo "fake gh: unexpected $*" >&2
 exit 1
 EOF
-chmod +x "$tmp/bin/gh"
+cat >"$tmp/bin/fake-ssh" <<'EOF'
+#!/bin/sh
+[ "$1" = git@github.com ] || { echo "fake ssh: unexpected host $1" >&2; exit 1; }
+cd "$FAKE_SSH_ROOT" && exec sh -c "$2"
+EOF
+chmod +x "$tmp/bin/gh" "$tmp/bin/fake-ssh"
 
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL ANTHROPIC_API_KEY
 token=e2e0dummy0credential0value
 export PATH="$tmp/bin:$PATH" FAKE_GH_DIR="$tmp/gh" JIG_HOME="$tmp/home" JIG_PROFILES="$tmp/profiles"
+export GIT_SSH_COMMAND="$tmp/bin/fake-ssh" GIT_SSH_VARIANT=simple FAKE_SSH_ROOT="$tmp/ssh"
 export CLAUDE_CODE_OAUTH_TOKEN="$token"
 
-origin="$tmp/origin.git"
+origin="$tmp/ssh/acme/shop.git"
 target="$tmp/shop"
 git init -q --bare -b main "$origin"
 git init -q -b main "$target"
 git -C "$target" config user.name "Test Author"
 git -C "$target" config user.email test@example.com
-git -C "$target" remote add origin "$origin"
+git -C "$target" remote add origin git@github.com:acme/shop.git
 mkdir "$target/.jig"
 cp -p "$tmp/profile/"* "$target/.jig/"
 echo shop >"$target/README"
@@ -303,6 +310,8 @@ $(printf '%40s' '' | tr ' ' a), turns: 999999, estimated cost \$999999.99
 
 jig smoke
 equals "smoke exits 0" "$?" 0
+checks=$(( checks + 1 ))
+[ ! -e "$tmp/gh/calls" ] || fail "smoke runs gh: $(cat "$tmp/gh/calls")"
 has_line "setup in smoke gets the checked HEAD as JIG_BASE" "$tmp/out" "setup: JIG_BASE=$base HEAD=$base branch="
 has_line "verify in smoke gets the checked HEAD as JIG_BASE" "$tmp/out" "verify: JIG_BASE=$base"
 has_line "the diff against JIG_BASE is empty in smoke" "$tmp/out" "verify: changed since JIG_BASE:"
@@ -311,6 +320,10 @@ has_line "smoke has no plan" "$tmp/out" "verify: plan mount: absent"
 printf '# Add a health file\n\nIssue: #12\n\nWrite ok to health.txt.\n' >"$tmp/plans/add-health.md"
 jig run "$tmp/plans/add-health.md"
 equals "a clean run exits 0" "$?" 0
+equals "pr delivery checks gh's login and its name for the origin URL, then opens the PR" "$(cut -d' ' -f1-6 "$tmp/gh/calls")" \
+  "auth status --hostname github.com
+repo view git@github.com:acme/shop.git --json nameWithOwner --jq
+pr create --repo acme/shop --base main"
 has_line "setup starts on the base on the new branch" "$runs/add-health/setup.log" \
   "setup: JIG_BASE=$base HEAD=$base branch=jig/add-health"
 has_line "the agent sees the prompt, the read-only plan and JIG_BASE on a branch without a plan commit" \

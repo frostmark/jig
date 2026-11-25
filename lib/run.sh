@@ -43,11 +43,11 @@ export GIT_AUTHOR_NAME="$git_name" GIT_COMMITTER_NAME="$git_name"
 export GIT_AUTHOR_EMAIL="$git_email" GIT_COMMITTER_EMAIL="$git_email"
 
 docker info >/dev/null 2>&1 || jig_fail "Docker is not running"
-gh auth status --hostname github.com >/dev/null 2>&1 || jig_fail "gh is not logged in to github.com: run gh auth login"
 
 jig_repo_identity
 jig_find_overlay
 jig_resolve_base
+[ "$profile_deliver" = branch ] || jig_check_gh
 jig_agent_options
 
 if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$branch"; then
