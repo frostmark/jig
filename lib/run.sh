@@ -57,11 +57,9 @@ case "$remote_status" in
   2) ;;
   *) jig_fail "could not list branches on origin" ;;
 esac
-if git -C "$repo_root" cat-file -e "$base:plans/$slug.md" 2>/dev/null; then
-  jig_fail "plans/$slug.md already exists on $base_branch: pick another plan file name"
-fi
 
 run="$jig_home/runs/$gh_owner/$gh_name/$slug"
+run_shown="\$JIG_HOME/runs/$gh_owner/$gh_name/$slug"
 [ ! -e "$run" ] || jig_fail "run directory $run already exists: remove it (rm -rf) to reuse the name"
 
 jig_project="jig-run_${docker_repo}_$slug"
@@ -175,26 +173,23 @@ jig_harness_report
 mkdir -p "$(dirname "$run")" || jig_fail "could not create $(dirname "$run")"
 mkdir "$run" || jig_fail "could not create $run"
 jig_extract_profile "$base" "$run" || die "could not put the profile of $base and the overlay into $run/profile"
-jig_use_harness "$run/compose.harness.yml" "$run/system-prompt.md" || die "could not write the harness files into $run"
+cp "$plan_abs" "$run/plan.md" || die "could not copy the plan to $run/plan.md"
+jig_use_harness "$run/compose.harness.yml" "$run/system-prompt.md" "$run/plan.md" ||
+  die "could not write the harness files into $run"
 jig_clone "$base" "$run/repo" || die "git clone failed"
-mkdir -p "$run/repo/plans" || die "could not create $run/repo/plans"
-cp "$plan_abs" "$run/repo/plans/$slug.md" || die "could not copy the plan into the clone"
-plan_blob="$(git -C "$repo_root" hash-object "$plan_abs")" || die "git hash-object failed for the plan"
 
-jig_use_workspace "$run/repo"
+jig_use_workspace "$run/repo" "$base"
 trap finish EXIT
 
 echo "$jig_name: starting compose project $jig_project"
 jig_compose up -d --build --wait || die "docker compose up failed"
 
-jig_compose exec -T -e GIT_AUTHOR_NAME -e GIT_AUTHOR_EMAIL -e GIT_COMMITTER_NAME -e GIT_COMMITTER_EMAIL app \
-  sh -c 'git switch -q -c "$1" && git add "plans/$2.md" && git commit -q -m "Add the jig plan plans/$2.md"' \
-  sh "$branch" "$slug" || die "could not commit the plan in the container"
+jig_compose exec -T app git switch -q -c "$branch" || die "could not create $branch in the container"
 
 echo "$jig_name: preparing the environment with $profile_setup (log: $run/setup.log)"
 jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_setup")" >"$run/setup.log" 2>&1 || die "$profile_setup failed: see $run/setup.log"
 
-prompt="Implement the plan in plans/$slug.md."
+prompt="$jig_plan_prompt"
 
 echo "$jig_name: agent running, up to $minutes min (log: $run/claude.log)"
 agent_started=$(date +%s)
@@ -223,18 +218,23 @@ jig_compose exec -T app git -c core.fsmonitor=false status --porcelain >"$run/st
   die "git status failed in the container: see $collect"
 jig_compose exec -T app sh -c 'cat JIG_BLOCKED.md 2>/dev/null || true' >"$run/blocked-worktree.md" 2>>"$collect" ||
   die "could not read JIG_BLOCKED.md in the container: see $collect"
-jig_compose exec -T app git -c core.fsmonitor=false bundle create - "refs/heads/$branch" "^$base" \
-  >"$run/branch.bundle" 2>>"$collect" || die "could not bundle $branch in the container: see $collect"
-jig_compose exec -T app \
-  sh -c 'git -c core.hooksPath=/dev/null -c core.fsmonitor=false checkout -q -f "$1" && git -c core.fsmonitor=false clean -q -fd' \
-  sh "$branch" >>"$collect" 2>&1 ||
-  die "could not check out a clean $branch for $profile_verify: see $collect"
+commits="$(jig_compose exec -T app git -c core.fsmonitor=false rev-list --count "refs/heads/$branch" "^$base" 2>>"$collect")" &&
+  [[ $commits =~ ^[0-9]+$ ]] || die "could not count the commits of $branch in the container: see $collect"
 
-echo "$jig_name: running $profile_verify on the committed $branch (log: $run/verify.log)"
 verify_status=0
-jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_verify")" >"$run/verify.log" 2>&1 || verify_status=$?
-[ "$verify_status" != 130 ] || exit 130
-echo "$jig_name: $profile_verify exit $verify_status"
+if [ "$commits" != 0 ]; then
+  jig_compose exec -T app git -c core.fsmonitor=false bundle create - "refs/heads/$branch" "^$base" \
+    >"$run/branch.bundle" 2>>"$collect" || die "could not bundle $branch in the container: see $collect"
+  jig_compose exec -T app \
+    sh -c 'git -c core.hooksPath=/dev/null -c core.fsmonitor=false checkout -q -f "$1" && git -c core.fsmonitor=false clean -q -fd' \
+    sh "$branch" >>"$collect" 2>&1 ||
+    die "could not check out a clean $branch for $profile_verify: see $collect"
+
+  echo "$jig_name: running $profile_verify on the committed $branch (log: $run/verify.log)"
+  jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_verify")" >"$run/verify.log" 2>&1 || verify_status=$?
+  [ "$verify_status" != 130 ] || exit 130
+  echo "$jig_name: $profile_verify exit $verify_status"
+fi
 
 extract_js='
 let r = null;
@@ -266,6 +266,16 @@ teardown || die "docker compose down failed: remove project $jig_project by hand
 echo "$jig_name: compose project $jig_project removed"
 remove_clone
 
+if [ "$commits" = 0 ]; then
+  [ "$timed_out" = 0 ] || echo "$jig_name: the agent hit JIG_TIMEOUT=$minutes min and was stopped"
+  [ -z "$agent_meta" ] || echo "$jig_name: agent: $agent_meta"
+  ! grep -q 'JIG_BLOCKED\.md$' "$run/status.txt" ||
+    echo "$jig_name: the agent left JIG_BLOCKED.md uncommitted: see $run/blocked-worktree.md"
+  [ ! -s "$run/status.txt" ] || echo "$jig_name: uncommitted changes were left in the clone: see $run/status.txt"
+  [ ! -s "$run/summary.md" ] || echo "$jig_name: the agent's final message: $run/summary.md"
+  die "the agent made no commits on $branch (agent exit $agent_status): nothing was pushed and no PR was opened."
+fi
+
 git -C "$repo_root" -c transfer.fsckObjects=true -c fetch.fsckObjects=true \
   fetch --quiet "$run/branch.bundle" "refs/heads/$branch:refs/heads/$branch" || { rm -f "$run/branch.bundle"; die "could not fetch $branch from the bundle"; }
 fetched=1
@@ -273,12 +283,6 @@ fetched=1
 g() { git -C "$repo_root" "$@"; }
 tip="$(g rev-parse --verify "refs/heads/$branch^{commit}")" || die "could not resolve $branch"
 g merge-base --is-ancestor "$base" "$tip" || die "$branch does not start from $base_branch ($base)"
-first="$(g rev-list --reverse --ancestry-path "$base..$tip" | sed -n 1p)" || die "git rev-list failed on $branch"
-[ -n "$first" ] && [ "$(g rev-list --parents -n 1 "$first")" = "$first $base" ] ||
-  die "the first commit of $branch is not a single-parent commit on top of $base_branch"
-[ "$(g diff-tree --no-commit-id -r --name-status "$first")" = "$(printf 'A\tplans/%s.md' "$slug")" ] &&
-  [ "$(g rev-parse "$first:plans/$slug.md")" = "$plan_blob" ] ||
-  die "the first commit of $branch is not the plan commit (it must add exactly plans/$slug.md)"
 
 g log -p --text --diff-merges=first-parent --format=fuller "$base..$tip" >"$run/branch.patch" ||
   die "git log failed on $branch"
@@ -300,16 +304,12 @@ done < <(cat "$run/touched.z" "$run/changed.z")
 
 protected=""
 protected_count=0
-beyond_plan=0
+changes=0
 while IFS= read -r -d '' f; do
-  case "$f" in
-    "plans/$slug.md") [ "$(g rev-parse "$tip:$f" 2>/dev/null || true)" != "$plan_blob" ] || continue ;;
-    JIG_BLOCKED.md) ;;
-    *) beyond_plan=1 ;;
-  esac
+  [ "$f" = JIG_BLOCKED.md ] || changes=1
   if jig_protected "$f"; then
     protected_count=$(( protected_count + 1 ))
-    [ "$protected_count" -gt "$list_max" ] || protected="$protected- \`$(printable "$f")\`
+    [ "$protected_count" -gt "$list_max" ] || protected="$protected- \`$(jig_pr_line "$f")\`
 "
   fi
 done <"$run/changed.z"
@@ -317,16 +317,22 @@ done <"$run/changed.z"
 "
 
 blocked=""
+blocked_file=""
 if g cat-file -e "$tip:JIG_BLOCKED.md" 2>/dev/null; then
   g show "$tip:JIG_BLOCKED.md" >"$run/blocked-branch.md" || die "could not read JIG_BLOCKED.md from $branch"
-  blocked="$(head -c 10000 "$run/blocked-branch.md")" || die "could not read $run/blocked-branch.md"
-  [ -n "$blocked" ] || blocked="(empty)"
+  blocked_file="blocked-branch.md"
 elif grep -q 'JIG_BLOCKED\.md$' "$run/status.txt"; then
-  blocked="$(head -c 10000 "$run/blocked-worktree.md")
-(left uncommitted in the clone)" || die "could not read $run/blocked-worktree.md"
+  blocked_file="blocked-worktree.md"
+fi
+if [ -n "$blocked_file" ]; then
+  blocked="$(jig_pr_excerpt "$jig_pr_blocked_max" "$run/$blocked_file" '    > ' \
+    "    > (cut: the whole text is in \`$run_shown/$blocked_file\`)")" || die "could not read $run/$blocked_file"
+  [ -n "$blocked" ] || blocked="    > (empty)"
+  [ "$blocked_file" = blocked-branch.md ] || blocked="$blocked
+    > (left uncommitted in the clone)"
 fi
 
-title="$(sed -n 's/^# //p' "$plan_abs" | sed -n 1p)" || die "could not read the title of $plan_abs"
+title="$(sed -n 's/^# //p' "$run/plan.md" | sed -n 1p)" || die "could not read the title of $run/plan.md"
 [ -n "$title" ] || title="$slug"
 
 reasons=""
@@ -335,7 +341,7 @@ note() { attention="$attention- $1
 "; }
 if [ "$verify_status" != 0 ]; then
   reasons="$reasons $profile_verify red;"
-  note "$profile_verify is red (exit $verify_status): see \`$run/verify.log\`."
+  note "$profile_verify is red (exit $verify_status): see \`$run_shown/verify.log\`."
 fi
 if [ "$timed_out" = 1 ]; then
   reasons="$reasons timeout;"
@@ -348,7 +354,7 @@ if [ -n "$blocked" ]; then
   reasons="$reasons JIG_BLOCKED.md;"
   note "The agent left JIG_BLOCKED.md:
 
-$(printf '%s\n' "$blocked" | sed 's/^/    > /')
+$blocked
 "
 fi
 if [ -n "$protected" ]; then
@@ -356,9 +362,9 @@ if [ -n "$protected" ]; then
   note "Changes in paths the agent must not edit:
 $(printf '%s' "$protected" | sed 's/^/  /')"
 fi
-if [ "$beyond_plan" = 0 ]; then
-  reasons="$reasons no changes beyond the plan;"
-  note "The branch has no changes beyond the plan."
+if [ "$changes" = 0 ]; then
+  reasons="$reasons no changes;"
+  note "The branch's commits change nothing against $base_branch other than \`JIG_BLOCKED.md\`."
 fi
 if [ -s "$run/status.txt" ]; then
   reasons="$reasons uncommitted changes;"
@@ -366,7 +372,7 @@ if [ -s "$run/status.txt" ]; then
   status_count=0
   while IFS= read -r line || [ -n "$line" ]; do
     status_count=$(( status_count + 1 ))
-    [ "$status_count" -gt "$list_max" ] || status_lines="$status_lines$(printable "$line")
+    [ "$status_count" -gt "$list_max" ] || status_lines="$status_lines$(jig_pr_line "$line")
 "
   done <"$run/status.txt"
   [ "$status_count" -le "$list_max" ] || status_lines="$status_lines... and $(( status_count - list_max )) more
@@ -377,20 +383,19 @@ if [ -s "$run/status.txt" ]; then
 $status_lines\`\`\`"
 fi
 
-summary="$(head -c 40000 "$run/summary.md")" || die "could not read $run/summary.md"
-[ -n "$summary" ] || summary="(the agent left no final message: see \`$run/claude.log\`)"
+summary="$(jig_pr_excerpt "$jig_pr_summary_max" "$run/summary.md" '' "
+*The summary is cut here: the whole message is in \`$run_shown/summary.md\`.*")" || die "could not read $run/summary.md"
+[ -n "$summary" ] || summary="(the agent left no final message: see \`$run_shown/claude.log\`)"
 if [ "$verify_status" = 0 ]; then verify_text="green"; else verify_text="red (exit $verify_status)"; fi
 agent_text="exit $agent_status"
 [ -z "$agent_meta" ] || agent_text="$agent_text, $agent_meta"
 
 body="$run/pr-body.md"
-{
-  echo "Plan: [plans/$slug.md](https://github.com/$gh_repo/blob/$branch/plans/$slug.md)"
-  echo
+pr_top="$(
   echo "- $profile_verify: $verify_text"
   echo "- Agent: $agent_text"
   echo "- Duration: $(elapsed "$started") in total, agent $agent_duration (limit $minutes min)"
-  echo "- Log: \`$run/claude.log\`"
+  echo "- Log: \`$run_shown/claude.log\`"
   if [ -n "$attention" ]; then
     echo
     echo "## Needs attention"
@@ -405,11 +410,11 @@ body="$run/pr-body.md"
   echo "## Agent summary"
   echo
   printf '%s\n' "$summary"
-  echo
-  echo "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
-} >"$body" || die "could not write $body"
+)" || die "could not compose the PR description"
+jig_pr_body "$run/plan.md" "$run_shown/plan.md" "$pr_top" "🤖 Generated with [Claude Code](https://claude.com/claude-code)" >"$body" ||
+  die "could not write $body"
 
-refuse_leaks pr-body.md
+refuse_leaks plan.md pr-body.md
 
 g push --quiet origin "refs/heads/$branch:refs/heads/$branch" || die "git push origin $branch failed"
 pr_args=(--base "$base_branch" --head "$branch" --title "$title" --body-file "$body")

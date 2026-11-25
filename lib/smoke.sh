@@ -25,7 +25,7 @@ mkdir -p "$run"
 jig_extract_profile "$head" "$run"
 jig_clone "$head" "$run/repo"
 
-jig_use_workspace "$run/repo"
+jig_use_workspace "$run/repo" "$head"
 trap finish EXIT
 jig_compose up -d --build --wait
 jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_setup")"

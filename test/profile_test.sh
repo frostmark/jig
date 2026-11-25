@@ -147,7 +147,6 @@ protect deploy/?" "cfg:4: protect must be"
 refused "protect with a backslash" "$valid
 protect deploy\\*" "cfg:4: protect must be"
 
-slug=add-health-check
 jig_parse_profile cfg <<<"base main
 setup bin/setup
 verify scripts/verify"
@@ -156,8 +155,7 @@ protected ".jig/config"
 protected ".jig/docker/Dockerfile"
 protected "bin/setup"
 protected "scripts/verify"
-protected "plans/add-health-check.md"
-not_protected "plans/other.md"
+not_protected "plans/add-health-check.md"
 not_protected "CLAUDE.md"
 not_protected "jig/config"
 not_protected "app/.jig/config"
@@ -503,6 +501,10 @@ equals "the merged profile's files" "$(files_in "$tmp/run/profile/.jig")" \
 equals "an overlay file replaces the repository's" "$(cat "$tmp/run/profile/.jig/Dockerfile")" "overlay Dockerfile"
 checks=$(( checks + 1 ))
 [ -x "$tmp/run/profile/.jig/setup" ] || fail "an overlay script keeps its executable mode over a repository file without it"
+equals "the profile's compose file gives the app service JIG_BASE" \
+  "$(sed -n '/^  app:$/,/^  [^ ]/p' "$tmp/run/compose.profile.yml" | grep -c '^      JIG_BASE: ${JIG_BASE:?jig sets JIG_BASE}$')" 1
+equals "the workspace comes with its base commit" \
+  "$( (jig_use_workspace "$tmp/run/repo" "$last" && printf '%s|%s' "$JIG_WORKSPACE" "$JIG_BASE") 2>&1)" "$tmp/run/repo|$last"
 rm -r "$JIG_PROFILES"
 
 new_origin

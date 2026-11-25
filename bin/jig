@@ -16,6 +16,7 @@ jig_name="jig"
 . "$engine_root/lib/common.sh"
 . "$engine_root/lib/profile.sh"
 . "$engine_root/lib/harness.sh"
+. "$engine_root/lib/pr.sh"
 
 usage() {
   echo "usage: jig run <plan.md> [--repo <path>]" >&2

@@ -1,6 +1,8 @@
 jig_rules_file="$engine_root/lib/rules.md"
 jig_prompt_target=/jig/system-prompt.md
 jig_plugin_target=/jig/overlay
+jig_plan_target=/jig/plan.md
+jig_plan_prompt="Implement the plan in $jig_plan_target."
 
 jig_set_profiles() {
   overlay_root="${JIG_PROFILES:-$jig_home/profiles}"
@@ -118,6 +120,10 @@ jig_write_harness_compose() {
     echo "        source: \${JIG_SYSTEM_PROMPT:?jig sets JIG_SYSTEM_PROMPT}"
     echo "        target: $jig_prompt_target"
     echo "        read_only: true"
+    echo "      - type: bind"
+    echo "        source: \${JIG_PLAN:?jig sets JIG_PLAN}"
+    echo "        target: $jig_plan_target"
+    echo "        read_only: true"
     if [ -n "$overlay_plugin" ]; then
       echo "      - type: bind"
       echo "        source: \${JIG_OVERLAY_PLUGIN:?jig sets JIG_OVERLAY_PLUGIN}"
@@ -128,10 +134,10 @@ jig_write_harness_compose() {
 }
 
 jig_use_harness() {
-  local compose_file="$1" prompt_file="$2"
+  local compose_file="$1" prompt_file="$2" plan_file="$3"
   jig_write_system_prompt "$prompt_file" || return 1
   jig_write_harness_compose "$compose_file" || return 1
-  export JIG_SYSTEM_PROMPT="$prompt_file"
+  export JIG_SYSTEM_PROMPT="$prompt_file" JIG_PLAN="$plan_file"
   jig_harness_args=(--append-system-prompt-file "$jig_prompt_target")
   if [ -n "$overlay_plugin" ]; then
     export JIG_OVERLAY_PLUGIN="$overlay_plugin"

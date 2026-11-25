@@ -159,6 +159,8 @@ jig_write_profile_compose() {
   {
     echo "services:"
     echo "  app:"
+    echo "    environment:"
+    echo "      JIG_BASE: \${JIG_BASE:?jig sets JIG_BASE}"
     echo "    volumes:"
     echo "      - type: bind"
     echo "        source: \${JIG_PROFILE_DIR:?jig sets JIG_PROFILE_DIR}"
@@ -289,7 +291,7 @@ jig_resolve_base() {
 }
 
 jig_protected_patterns() {
-  protected_patterns=(".jig/*" "$profile_setup" "$profile_verify" "plans/$slug.md" ${profile_protect[@]+"${profile_protect[@]}"})
+  protected_patterns=(".jig/*" "$profile_setup" "$profile_verify" ${profile_protect[@]+"${profile_protect[@]}"})
 }
 
 jig_protected() {
