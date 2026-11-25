@@ -203,6 +203,11 @@ exits_2 "an owner directory that differs only in case stops jig" \
   find_in "$profiles"
 mv "$profiles/ACME" "$tmp/acme-overlays"
 ln -s "$tmp/acme-overlays" "$profiles/acme"
+mv "$tmp/acme-overlays/shop" "$tmp/acme-overlays/Shop"
+exits_2 "a repository directory in another case is found behind an owner directory that is a link" \
+  "jig: the overlay directory is spelled $profiles/acme/Shop, but the origin URL (acme/shop) makes jig look for $profiles/acme/shop:" \
+  find_in "$profiles"
+mv "$tmp/acme-overlays/Shop" "$tmp/acme-overlays/shop"
 mkdir "$tmp/acme-overlays/shop-old" "$tmp/acme-overlays/shop.d"
 : >"$tmp/acme-overlays/shop/rules.md"
 equals "an owner directory that is a link is looked into, and names that only start with the repository's do not count" \
