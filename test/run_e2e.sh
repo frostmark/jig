@@ -835,6 +835,8 @@ equals "the built image is labelled with the repository" \
 checks=$(( checks + 1 ))
 [ ! -e "$smoke/repo" ] || fail "a green smoke that builds removes its clone"
 smoke_image="$(image_id "$built")"
+equals "the image is built once, by jig's build step and not again by up" \
+  "$(cat "$tmp/out" "$tmp/err" | grep -c "naming to docker.io/library/$built")" 1
 
 printf '#!/bin/sh\necho "verify: red on purpose"\nexit 3\n' >"$overlay/verify"
 chmod +x "$overlay/verify"
@@ -892,6 +894,7 @@ no_gh "a clean run that builds"
 checks=$(( checks + 1 ))
 grep -q -F "build $build_id-health sees [REDACTED]" "$runs/build-health/build.log" || fail "the clean run's build.log has the build's output redacted"
 no_secret "$tmp/out" "$tmp/err" "$runs/build-health/build.log"
+equals "a run builds the image once" "$(cat "$tmp/out" "$tmp/err" | grep -c "naming to docker.io/library/$built")" 1
 checks=$(( checks + 1 ))
 [ -z "$(image_id "$leak_image")" ] || fail "each rebuild removes the image it left dangling"
 equals "only the current image and another repository's are left" "$(test_images | wc -l | tr -d ' ')" 3

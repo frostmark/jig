@@ -1074,6 +1074,9 @@ cat >"$tmp/compose/build.json" <<'EOF'
         "JIG_BASE": "0123"
       },
       "image": "acme-shop-jig",
+      "labels": {
+        "E2E_SECRET": "service label"
+      },
       "networks": {
         "default": null
       }
