@@ -320,9 +320,9 @@ blocked=""
 blocked_file=""
 if g cat-file -e "$tip:JIG_BLOCKED.md" 2>/dev/null; then
   g show "$tip:JIG_BLOCKED.md" >"$run/blocked-branch.md" || die "could not read JIG_BLOCKED.md from $branch"
-  blocked_file=blocked-branch.md
+  blocked_file="blocked-branch.md"
 elif grep -q 'JIG_BLOCKED\.md$' "$run/status.txt"; then
-  blocked_file=blocked-worktree.md
+  blocked_file="blocked-worktree.md"
 fi
 if [ -n "$blocked_file" ]; then
   blocked="$(jig_pr_excerpt "$jig_pr_blocked_max" "$run/$blocked_file" '    > ' \
