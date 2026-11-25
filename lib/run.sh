@@ -132,14 +132,6 @@ teardown() {
   jig_down
 }
 
-# The clone holds the agent's .git: its hooks and config would run in any git-aware prompt or editor on the host.
-remove_clone() {
-  [ -e "$run/repo" ] || return 0
-  chmod -R u+rwX "$run/repo" 2>/dev/null || true
-  rm -rf "$run/repo" ||
-    echo "$jig_name: WARNING: could not remove $run/repo; delete it without running git or opening it in an editor" >&2
-}
-
 finish() {
   local status=$?
   trap '' INT TERM HUP
@@ -147,7 +139,7 @@ finish() {
   if [ "$down_done" = 0 ]; then
     teardown || echo "$jig_name: docker compose down failed: remove project $jig_project by hand" >&2
   fi
-  remove_clone
+  jig_remove_clone "$run/repo"
   redact_logs
   exit "$status"
 }
@@ -258,7 +250,7 @@ echo "$jig_name: agent: $(jig_redact_text "$agent_report")"
 teardown || die "docker compose down failed: remove project $jig_project by hand"
 [ "$jig_interrupted" = 0 ] || exit 130
 echo "$jig_name: compose project $jig_project removed"
-remove_clone
+jig_remove_clone "$run/repo"
 
 if [ "$commits" = 0 ]; then
   [ "$timed_out" = 0 ] || echo "$jig_name: the agent hit JIG_TIMEOUT=$minutes min and was stopped"

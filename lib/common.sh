@@ -181,6 +181,14 @@ jig_redact_files() {
     echo "$jig_name: WARNING: $(jig_values_found "$removed_names") found in$removed, which could not be redacted and were removed from $dir" >&2
 }
 
+# The clone holds a .git that ran the repository's scripts, and in jig run the agent: its hooks and config would run in any git-aware prompt or editor on the host.
+jig_remove_clone() {
+  [ -e "$1" ] || return 0
+  chmod -R u+rwX "$1" 2>/dev/null || true
+  rm -rf "$1" ||
+    echo "$jig_name: WARNING: could not remove $1; delete it without running git or opening it in an editor" >&2
+}
+
 jig_docker_name() {
   printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C tr -c 'a-z0-9-' '-'
 }

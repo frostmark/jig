@@ -19,6 +19,11 @@ finish() {
   trap '' INT TERM HUP
   set +e
   jig_down || [ "$status" -ne 0 ] || status=1
+  if [ "$status" = 0 ]; then
+    jig_remove_clone "$run/repo"
+  elif [ -e "$run/repo" ]; then
+    echo "$jig_name: the clone stays for a look until the next smoke: $run/repo" >&2
+  fi
   [ ! -f "$run/build.log" ] || jig_redact_files "$run" build.log
   echo "$jig_name: smoke exit $status after $(( $(date +%s) - started ))s"
   exit "$status"
