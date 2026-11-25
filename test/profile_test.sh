@@ -198,7 +198,29 @@ refused "repeated effort" "$valid
 effort low
 effort max" "cfg:5: effort is already set on line 4"
 refused "the unknown key message lists the keys" "$valid
-colour red" "known keys: base, setup, verify, protect, model, effort"
+colour red" "known keys: base, setup, verify, protect, model, effort, deliver"
+
+jig_parse_profile cfg <<<"$valid"
+equals "deliver is pr by default" "$profile_deliver" pr
+jig_parse_profile cfg <<<"$valid
+deliver branch"
+equals "deliver branch" "$profile_deliver" branch
+jig_parse_profile cfg <<<"$valid"
+equals "no deliver: the previous profile's branch delivery is gone" "$profile_deliver" pr
+jig_parse_profile cfg <<<"$valid
+deliver pr"
+equals "deliver pr" "$profile_deliver" pr
+refused "deliver that is not a mode" "$valid
+deliver push" "cfg:4: deliver must be pr or branch"
+refused "deliver in upper case" "$valid
+deliver Branch" "cfg:4: deliver must be pr or branch"
+refused "deliver with a mode as its prefix" "$valid
+deliver branches" "cfg:4: deliver must be pr or branch"
+refused "deliver as a mode's prefix" "$valid
+deliver bran" "cfg:4: deliver must be pr or branch"
+refused "repeated deliver" "$valid
+deliver branch
+deliver pr" "cfg:5: deliver is already set on line 4"
 
 jig_parse_profile cfg <<<"base main
 setup bin/setup
@@ -341,7 +363,9 @@ new_origin
 write_profile "$(profile_of main 'deploy/*')"
 publish main
 git clone -q "$tmp/origin.git" "$target"
+printf "the owner's fetch\n" >"$target/.git/FETCH_HEAD"
 equals "the default branch names itself" "$(resolved)" "$last main deploy/*"
+equals "fetching the base leaves the target's FETCH_HEAD alone" "$(cat "$target/.git/FETCH_HEAD")" "the owner's fetch"
 
 new_origin
 w commit -q --allow-empty -m "no profile"
@@ -667,6 +691,11 @@ profile .jig/x?y/notes: repository
 WARNING: JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version
 WARNING: the overlay's config replaces the repository's .jig/config
 \`\`\`"
+branch_warned() {
+  (jig_find_overlay && load_head && profile_deliver=branch && jig_profile_report >/dev/null 2>"$tmp/err" && sed -n 1p "$tmp/err") 2>&1
+}
+equals "with deliver branch the report, not a PR, cannot name the overlay's version" "$(branch_warned)" \
+  "jig: WARNING: JIG_PROFILES is not a git repository with a commit, so the report cannot name the overlay's version"
 git init -q -b main "$JIG_PROFILES"
 equals "an overlay repository without a commit" "$(warned)" "jig: WARNING: JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version
 jig: WARNING: the overlay's config replaces the repository's .jig/config"
@@ -692,6 +721,8 @@ jig: profile .jig/config: overlay $overlay/config
 jig: profile .jig/x?y/notes: repository
 jig: WARNING: the overlay acme/shop is outside the git repository JIG_PROFILES, so the PR cannot name its version
 jig: WARNING: the overlay's config replaces the repository's .jig/config"
+equals "with deliver branch the report, not a PR, cannot name the version of an overlay outside the repository" \
+  "$(branch_warned)" "jig: WARNING: the overlay acme/shop is outside the git repository JIG_PROFILES, so the report cannot name its version"
 rm "$overlay"
 mv "$tmp/shop-overlay" "$overlay"
 git -C "$JIG_PROFILES" add -A && git -C "$JIG_PROFILES" commit -q -m overlay

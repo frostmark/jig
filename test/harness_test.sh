@@ -42,6 +42,78 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
 
+github_repo() {
+  equals "$1 names $2" "$(jig_github_repo "$1" || echo refused)" "$2"
+}
+for url in https://github.com/acme/shop.git https://github.com/acme/shop https://github.com/acme/shop/ \
+  https://github.com/acme/shop.git/ http://github.com/acme/shop git://github.com/acme/shop.git \
+  https://user:x-token@github.com/acme/shop.git https://github.com:443/acme/shop https://GitHub.COM/acme/shop \
+  git@github.com:acme/shop.git git@github.com:acme/shop github.com:acme/shop.git git@github.com:/acme/shop.git \
+  ssh://git@github.com/acme/shop.git ssh://git@github.com:22/acme/shop ssh://github.com/acme/shop/; do
+  github_repo "$url" acme/shop
+done
+github_repo https://github.com/Acme-Corp/My_Shop.v2.git Acme-Corp/My_Shop.v2
+github_repo git@github.com:Acme/Shop Acme/Shop
+github_repo https://github.com/acme/shop.git.git acme/shop.git
+github_repo https://github.com/acme/.github acme/.github
+github_repo git@github.com:acme/.gitignore.git acme/.gitignore
+for url in /srv/git/shop.git file:///srv/github.com/acme/shop.git https://gitlab.com/acme/shop.git \
+  git@gitlab.com:acme/shop.git https://github.com.example.org/acme/shop https://example.org/github.com/acme/shop \
+  mygithub.com:acme/shop https://notgithub.com/acme/shop https://github.com/acme https://github.com/acme/shop/tree/main \
+  https://github.com/acme/shop.git/extra 'https://github.com/acme/sh op' 'https://github.com/acme/shop;id' \
+  'https://github.com/acme/$(id)' https://github.com/../shop https://github.com/acme/.. https://github.com/./shop \
+  https://github.com/acme/.git https://github.com/acme/.git.git git@github.com:acme/.GIT.git git@github.com:acme/.Git \
+  https://github.com/.git/shop ftp://github.com/acme/shop 'git@github.com:acme/shop:x' https://github.com//shop \
+  'git@github.com acme/shop' xssh://git@github.com/acme/shop /srv/github.com:acme/shop git@github.com:acme/shop/extra \
+  "https://github.com/acme/shop
+https://github.com/acme/other" https://github.com/acme/shоp; do
+  github_repo "$url" refused
+done
+
+git init -q "$tmp/identity"
+git -C "$tmp/identity" remote add origin git@github.com:Acme/My.Shop.git
+identity() {
+  (repo_root="$tmp/identity" && jig_repo_identity && printf '%s|%s|%s|%s|%s' "$origin_url" "$gh_repo" "$gh_owner" "$gh_name" "$docker_repo") 2>&1
+}
+equals "the identity keeps the origin URL's case, and the docker name is lowercased" "$(identity)" \
+  "git@github.com:Acme/My.Shop.git|Acme/My.Shop|Acme|My.Shop|acme_my-shop"
+git -C "$tmp/identity" remote set-url origin https://user:e2e0secret0value@gitlab.com/acme/shop.git
+exits_2 "an origin that is not on GitHub stops jig and names the accepted forms" \
+  "jig: the origin remote of $tmp/identity is not a GitHub repository URL; jig takes <owner>/<repo> from https://github.com/<owner>/<repo>, git@github.com:<owner>/<repo> or ssh://git@github.com/<owner>/<repo>, with or without .git" \
+  identity
+equals "the refused origin URL is not printed" "$(identity | grep -c e2e0secret0value)" 0
+git -C "$tmp/identity" remote remove origin
+exits_2 "a checkout without origin stops jig" "jig: $tmp/identity has no remote origin" identity
+
+gh() {
+  printf '%s\n' "$*" >>"$tmp/gh.calls"
+  case "$1 $2" in
+    "auth status") [ "$gh_auth" = ok ] ;;
+    "repo view") [ "$gh_view" != fail ] && echo "$gh_view" ;;
+    *) return 1 ;;
+  esac
+}
+check_gh() {
+  rm -f "$tmp/gh.calls"
+  (origin_url=git@github.com:acme/shop.git gh_repo=acme/shop repo_root=/src/shop && jig_check_gh) 2>&1
+}
+gh_auth=ok gh_view=acme/shop
+equals "gh that names the parsed repository passes" "$(check_gh)" ""
+equals "gh is asked about github.com and the origin URL" "$(cat "$tmp/gh.calls")" "auth status --hostname github.com
+repo view git@github.com:acme/shop.git --json nameWithOwner --jq .nameWithOwner"
+gh_auth=no
+exits_2 "pr delivery needs gh logged in" \
+  "jig: gh is not logged in to github.com: run gh auth login (deliver pr opens the PR with gh; deliver branch needs no gh)" check_gh
+gh_auth=ok gh_view=fail
+exits_2 "a failing gh repo view stops jig" "jig: gh repo view failed for the origin remote of /src/shop" check_gh
+gh_view=Acme/shop
+exits_2 "GitHub's spelling must be the origin URL's" \
+  "jig: the origin URL of /src/shop names the repository acme/shop, but GitHub names it Acme/shop: set origin to GitHub's spelling (git -C /src/shop remote set-url origin <URL>), which also names the overlay and the run directories" \
+  check_gh
+gh_view=acme/shop-old
+exits_2 "a renamed repository's old URL stops jig" "but GitHub names it acme/shop-old" check_gh
+unset -f gh
+
 gh_owner=acme
 gh_name=shop
 jig_home="$tmp/home"
@@ -119,6 +191,31 @@ ln -s "$tmp/missing" "$overlay"
 exits_2 "the repository's overlay is a dangling link" "the overlay $overlay must be a directory" find_in "$profiles"
 rm "$overlay"
 
+mkdir "$profiles/acme/Shop"
+exits_2 "an overlay directory whose name differs from the origin URL's only in case stops jig on any filesystem" \
+  "jig: the overlay directory is spelled $profiles/acme/Shop, but the origin URL (acme/shop) makes jig look for $profiles/acme/shop: give both GitHub's spelling (rename the directory, or set origin with git remote set-url)" \
+  find_in "$profiles"
+rmdir "$profiles/acme/Shop"
+mv "$profiles/acme" "$profiles/ACME"
+mkdir "$profiles/ACME/shop"
+exits_2 "an owner directory that differs only in case stops jig" \
+  "jig: the overlay directory is spelled $profiles/ACME, but the origin URL (acme/shop) makes jig look for $profiles/acme:" \
+  find_in "$profiles"
+mv "$profiles/ACME" "$tmp/acme-overlays"
+ln -s "$tmp/acme-overlays" "$profiles/acme"
+mv "$tmp/acme-overlays/shop" "$tmp/acme-overlays/Shop"
+exits_2 "a repository directory in another case is found behind an owner directory that is a link" \
+  "jig: the overlay directory is spelled $profiles/acme/Shop, but the origin URL (acme/shop) makes jig look for $profiles/acme/shop:" \
+  find_in "$profiles"
+mv "$tmp/acme-overlays/Shop" "$tmp/acme-overlays/shop"
+mkdir "$tmp/acme-overlays/shop-old" "$tmp/acme-overlays/shop.d"
+: >"$tmp/acme-overlays/shop/rules.md"
+equals "an owner directory that is a link is looked into, and names that only start with the repository's do not count" \
+  "$(found "$profiles")" "$overlay|$overlay/rules.md|"
+rm "$profiles/acme"
+rm -r "$tmp/acme-overlays"
+mkdir "$profiles/acme"
+
 jig_parse_profile cfg <<<"base main
 setup .jig/setup
 verify bin/verify
@@ -149,6 +246,53 @@ $(jig_protected_list)
 "* ]] || fail "the engine rules carry the protected list: $rules"
 checks=$(( checks + 1 ))
 [[ $rules != *@VERIFY@* && $rules != *@PROTECTED@* ]] || fail "the engine rules keep a placeholder: $rules"
+
+flat() {
+  printf '%s' "$1" | tr '\n' ' ' | tr -s ' '
+}
+has() {
+  checks=$(( checks + 1 ))
+  [[ $(flat "$2") == *"$3"* ]] || fail "$1: no \"$3\" in: $2"
+}
+hasnt() {
+  checks=$(( checks + 1 ))
+  [[ $(flat "$2") != *"$3"* ]] || fail "$1: \"$3\" in: $2"
+}
+shape="Your final message becomes part of the pull request description. By default write it as: What changes, Behaviour changes, Not done (with what you noticed but did not fix), How to check (what a reviewer should click or run, if anything). If the repository's instructions or the rules after these give the final message another shape, such as a team's pull request template, use that shape instead."
+equals "the rules are for pr delivery when the config has no deliver" "$profile_deliver" pr
+has "pr rules: jig pushes and opens the PR" "$rules" "Commit on the current branch, in small commits. Do not push or open a pull request: jig does that."
+has "pr rules: a protected path makes a draft, .github/ stops the push" "$rules" \
+  "Do not change these paths (\`*\` matches any characters, \`/\` included). jig opens the pull request as a draft if any of them changes, and pushes nothing if \`.github/\` changes. \`JIG_BLOCKED.md\` at the repository root is always allowed"
+has "pr rules: the final message goes into the PR, in the default shape unless other rules give one" "$rules" "$shape"
+hasnt "pr rules do not hand the branch over" "$rules" "hands the branch"
+checks=$(( checks + 1 ))
+[[ ! $rules =~ @[A-Z_]+@ ]] || fail "the pr rules keep a placeholder: $rules"
+jig_parse_profile cfg <<<"base main
+setup .jig/setup
+verify .jig/verify
+protect CLAUDE.md
+deliver branch"
+branch_rules="$(jig_engine_rules)"
+has "branch rules: jig hands the branch over" "$branch_rules" "Commit on the current branch, in small commits. Do not push: jig hands the branch to the owner."
+has "branch rules: a protected path or .github/ marks the branch for attention" "$branch_rules" \
+  "Do not change these paths (\`*\` matches any characters, \`/\` included). If any of them, or anything under \`.github/\`, changes, jig hands the branch over marked for the owner's attention. \`JIG_BLOCKED.md\` at the repository root is always allowed"
+has "branch rules: the final message goes into the run report, in the default shape unless other rules give one" "$branch_rules" \
+  "Your final message goes into the run report. ${shape#*description. }"
+for text in "pull request description" "opens the pull request" "pushes nothing" "jig does that"; do
+  hasnt "branch rules do not mention a PR jig opens: $text" "$branch_rules" "$text"
+done
+checks=$(( checks + 1 ))
+[[ ! $branch_rules =~ @[A-Z_]+@ ]] || fail "the branch rules keep a placeholder: $branch_rules"
+equals "branch rules differ from pr rules only in the delivery sentences" \
+  "$(diff <(printf '%s\n' "$rules") <(printf '%s\n' "$branch_rules") | grep -c '^[<>]')" 6
+for mode in queue ""; do
+  checks=$(( checks + 1 ))
+  (profile_deliver="$mode" && jig_engine_rules >/dev/null 2>&1) && fail "rules for an unknown delivery mode are refused: \"$mode\""
+done
+jig_parse_profile cfg <<<"base main
+setup .jig/setup
+verify .jig/verify
+protect CLAUDE.md"
 
 mkdir -p "$overlay"
 printf 'OVERLAY RULE: prefer small functions.\n' >"$overlay/rules.md"
@@ -229,6 +373,17 @@ equals "only an effort from the profile" "$(agent_options "" medium unset unset)
   "--effort medium|model: default, effort: medium (from the profile)"
 equals "empty JIG_MODEL and JIG_EFFORT leave the profile's values" "$(agent_options opus high "" "")" \
   "--model opus --effort high|model: opus (from the profile), effort: high (from the profile)"
+
+delivery() {
+  (profile_deliver="$1" && jig_delivery jig/add-health) 2>&1
+}
+equals "the launch says that pr delivery pushes the branch and opens a PR" "$(delivery pr)" \
+  "pr (pushes jig/add-health and opens a PR)"
+equals "the launch says branch delivery" "$(delivery branch)" branch
+for mode in queue ""; do
+  checks=$(( checks + 1 ))
+  out="$(delivery "$mode")" && fail "an unknown delivery mode is not named at launch: \"$mode\" -> $out"
+done
 
 fill() {
   printf "%$1s" '' | tr ' ' "$2"
@@ -651,6 +806,33 @@ equals "a line that is not read is named in 200 printable bytes" \
 equals "the word issue in prose, a heading or a plural label is no Issue line" \
   "$(unread '# Title\n\nIssue: #12\n\nThis fixes the issue where it fails.\n\nKnown issues: none.\n\nReissue: the token is renewed.\n\n## Issue: notes\n\n# Issue: another title\n')" \
   "Fixes #12|"
+
+for word in /home/dev/src/shop /srv/a_b.c-d/e=f:g@h%i+j,k; do
+  equals "a plain path is a shell word as is: $word" "$(jig_shell_word "$word")" "$word"
+done
+for word in "/home/dev/my shop" "/srv/it's" "/srv/'a'b''" '/srv/$(id)' '/srv/a;b' '/srv/`id`' '/srv/~a' '/srv/a*' '/srv/a"b' \
+  '/srv/a\b' "/srv/new
+line" ''; do
+  checks=$(( checks + 1 ))
+  quoted="$(jig_shell_word "$word")"
+  [ "$(eval "printf '%s' $quoted")" = "$word" ] && [[ $quoted == \'*\' ]] ||
+    fail "a path with shell characters is one quoted shell word: $word -> $quoted"
+done
+equals "a quote in a path is closed, escaped and reopened" "$(jig_shell_word "/srv/it's")" "'/srv/it'\\''s'"
+equals "the log command names the repository, the base commit and the branch" \
+  "$(jig_log_command "/home/dev/my shop" 0123abcd jig/add-health)" "git -C '/home/dev/my shop' log --oneline 0123abcd..jig/add-health"
+equals "the diff command names the repository, the base commit and the branch" \
+  "$(jig_diff_command "/home/dev/my shop" 0123abcd jig/add-health)" "git -C '/home/dev/my shop' diff 0123abcd...jig/add-health"
+equals "the diff command is whole for a repository path with a line break" \
+  "$(jig_diff_command "/srv/new
+line" 0123abcd jig/x)" "git -C '/srv/new
+line' diff 0123abcd...jig/x"
+equals "the report names the repository, the branch with its commits and the base" \
+  "$(jig_report_branch /home/dev/shop jig/add-health 2 main 0123abcd)" "- Repository: /home/dev/shop
+- Branch: jig/add-health (2 commits)
+- Base: main at 0123abcd"
+equals "one commit is singular" "$(jig_report_branch /home/dev/shop jig/x 1 develop 0123abcd | sed -n 2p)" \
+  "- Branch: jig/x (1 commit)"
 
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]

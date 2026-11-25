@@ -26,15 +26,22 @@ jig_valid_effort() {
   return 1
 }
 
+jig_valid_deliver() {
+  case "$1" in
+    pr | branch) return 0 ;;
+  esac
+  return 1
+}
+
 jig_valid_pattern() {
   local re='^[A-Za-z0-9._*-][A-Za-z0-9._/*-]*$'
   [[ $1 =~ $re ]]
 }
 
 jig_parse_profile() {
-  local label="$1" line key value n=0 base_line=0 setup_line=0 verify_line=0 model_line=0 effort_line=0 LC_ALL=C
+  local label="$1" line key value n=0 base_line=0 setup_line=0 verify_line=0 model_line=0 effort_line=0 deliver_line=0 LC_ALL=C
   local skip_re='^[[:blank:]]*(#|$)' line_re='^([a-z]+)[[:blank:]]+([^[:blank:]]+)[[:blank:]]*$'
-  profile_base="" profile_setup="" profile_verify="" profile_model="" profile_effort=""
+  profile_base="" profile_setup="" profile_verify="" profile_model="" profile_effort="" profile_deliver=pr
   profile_protect=()
   while IFS= read -r line || [ -n "$line" ]; do
     n=$(( n + 1 ))
@@ -74,8 +81,13 @@ jig_parse_profile() {
         jig_valid_effort "$value" || jig_fail "$label:$n: effort $jig_effort_rule"
         effort_line=$n
         profile_effort="$value" ;;
+      deliver)
+        [ "$deliver_line" = 0 ] || jig_fail "$label:$n: deliver is already set on line $deliver_line"
+        jig_valid_deliver "$value" || jig_fail "$label:$n: deliver must be pr or branch"
+        deliver_line=$n
+        profile_deliver="$value" ;;
       *)
-        jig_fail "$label:$n: unknown key $key (known keys: base, setup, verify, protect, model, effort)" ;;
+        jig_fail "$label:$n: unknown key $key (known keys: base, setup, verify, protect, model, effort, deliver)" ;;
     esac
   done
   [ "$base_line" != 0 ] || jig_fail "$label: missing the required key base"
@@ -229,9 +241,11 @@ jig_overlay_version() {
 }
 
 jig_overlay_warnings() {
+  local record="the PR"
+  [ "$profile_deliver" = pr ] || record="the report"
   case "$overlay_changes" in
-    unrecorded) echo "JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version" ;;
-    outside) echo "the overlay $gh_owner/$gh_name is outside the git repository JIG_PROFILES, so the PR cannot name its version" ;;
+    unrecorded) echo "JIG_PROFILES is not a git repository with a commit, so $record cannot name the overlay's version" ;;
+    outside) echo "the overlay $gh_owner/$gh_name is outside the git repository JIG_PROFILES, so $record cannot name its version" ;;
     unknown) echo "could not check the overlay $gh_owner/$gh_name for uncommitted changes (git status failed)" ;;
     uncommitted) echo "the overlay has uncommitted changes in $gh_owner/$gh_name, and this run uses them" ;;
   esac
@@ -284,7 +298,7 @@ $warnings\`\`\`
 }
 
 jig_fetch_branch() {
-  git -C "$repo_root" fetch --quiet --no-tags origin "+refs/heads/$1:refs/remotes/origin/$1" ||
+  git -C "$repo_root" fetch --quiet --no-tags --no-write-fetch-head origin "+refs/heads/$1:refs/remotes/origin/$1" ||
     jig_fail "git fetch origin $1 failed"
   fetched_rev="$(git -C "$repo_root" rev-parse --verify --quiet "refs/remotes/origin/$1^{commit}")" ||
     jig_fail "git fetch origin $1 did not update origin/$1"

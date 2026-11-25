@@ -52,18 +52,49 @@ jig_docker_name() {
   printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C tr -c 'a-z0-9-' '-'
 }
 
+jig_github_forms="https://github.com/<owner>/<repo>, git@github.com:<owner>/<repo> or ssh://git@github.com/<owner>/<repo>, with or without .git"
+
+jig_github_repo() {
+  local url="$1" host owner name part LC_ALL=C
+  local url_re='^(https?|ssh|git)://([^@/]+@)?([A-Za-z0-9.-]+)(:[0-9]+)?/([^/]+)/([^/]+)$'
+  local scp_re='^([^@/:]+@)?([A-Za-z0-9.-]+):/?([^/]+)/([^/]+)$'
+  local part_re='^[A-Za-z0-9._-]+$'
+  url="${url%/}"
+  if [[ $url =~ $url_re ]]; then
+    host="${BASH_REMATCH[3]}" owner="${BASH_REMATCH[5]}" name="${BASH_REMATCH[6]}"
+  elif [[ $url =~ $scp_re ]]; then
+    host="${BASH_REMATCH[2]}" owner="${BASH_REMATCH[3]}" name="${BASH_REMATCH[4]}"
+  else
+    return 1
+  fi
+  [ "$(printf '%s' "$host" | tr 'A-Z' 'a-z')" = github.com ] || return 1
+  name="${name%.git}"
+  for part in "$owner" "$name"; do
+    [[ $part =~ $part_re ]] || return 1
+    case "$part" in
+      . | .. | .[Gg][Ii][Tt]) return 1 ;;
+    esac
+  done
+  printf '%s/%s' "$owner" "$name"
+}
+
 jig_repo_identity() {
-  local name_re='^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' part origin_url
   origin_url="$(git -C "$repo_root" remote get-url origin)" || jig_fail "$repo_root has no remote origin"
-  gh_repo="$(gh repo view "$origin_url" --json nameWithOwner --jq .nameWithOwner)" ||
-    jig_fail "gh repo view failed for the origin remote of $repo_root: jig needs gh logged in to github.com and origin on GitHub"
-  [[ $gh_repo =~ $name_re ]] || jig_fail "gh repo view gave an unexpected repository name"
+  gh_repo="$(jig_github_repo "$origin_url")" ||
+    jig_fail "the origin remote of $repo_root is not a GitHub repository URL; jig takes <owner>/<repo> from $jig_github_forms"
   gh_owner="${gh_repo%%/*}"
   gh_name="${gh_repo#*/}"
-  for part in "$gh_owner" "$gh_name"; do
-    [ "$part" != . ] && [ "$part" != .. ] || jig_fail "gh repo view gave an unexpected repository name"
-  done
   docker_repo="$(jig_docker_name "$gh_owner")_$(jig_docker_name "$gh_name")"
+}
+
+jig_check_gh() {
+  local named
+  gh auth status --hostname github.com >/dev/null 2>&1 ||
+    jig_fail "gh is not logged in to github.com: run gh auth login (deliver pr opens the PR with gh; deliver branch needs no gh)"
+  named="$(gh repo view "$origin_url" --json nameWithOwner --jq .nameWithOwner)" ||
+    jig_fail "gh repo view failed for the origin remote of $repo_root"
+  [ "$named" = "$gh_repo" ] ||
+    jig_fail "the origin URL of $repo_root names the repository $gh_repo, but GitHub names it $(printable "$named"): set origin to GitHub's spelling (git -C $repo_root remote set-url origin <URL>), which also names the overlay and the run directories"
 }
 
 jig_clone() {

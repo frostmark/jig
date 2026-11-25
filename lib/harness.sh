@@ -12,7 +12,27 @@ jig_set_profiles() {
   esac
 }
 
+jig_overlay_spelling() {
+  local dir="$overlay_root" part entry exact other
+  for part in "$gh_owner" "$gh_name"; do
+    [ -d "$dir" ] || return 0
+    exact=0
+    other=""
+    while IFS= read -r -d '' entry; do
+      entry="${entry##*/}"
+      if [ "$entry" = "$part" ]; then exact=1; else other="$entry"; fi
+    done < <(find -H "$dir" -mindepth 1 -maxdepth 1 -iname "$part" -print0)
+    if [ "$exact" = 0 ]; then
+      [ -z "$other" ] ||
+        jig_fail "the overlay directory is spelled $(printable "$dir/$other"), but the origin URL ($gh_owner/$gh_name) makes jig look for $dir/$part: give both GitHub's spelling (rename the directory, or set origin with git remote set-url)"
+      return 0
+    fi
+    dir="$dir/$part"
+  done
+}
+
 jig_find_overlay() {
+  jig_overlay_spelling
   overlay_dir="$overlay_root/$gh_owner/$gh_name"
   overlay_rules=""
   overlay_plugin=""
@@ -93,10 +113,24 @@ jig_protected_list() {
 }
 
 jig_engine_rules() {
-  local text protected verify
+  local text protected verify delivery change final
   text="$(cat "$jig_rules_file")" || return 1
   protected="$(jig_protected_list)"
   verify="cd /workspace && $(jig_profile_command "$profile_verify")"
+  case "$profile_deliver" in
+    pr)
+      delivery="Do not push or open a pull request: jig does that."
+      change="jig opens the pull request as a draft if any of them changes, and pushes nothing if \`.github/\` changes."
+      final="Your final message becomes part of the pull request description." ;;
+    branch)
+      delivery="Do not push: jig hands the branch to the owner."
+      change="If any of them, or anything under \`.github/\`, changes, jig hands the branch over marked for the owner's attention."
+      final="Your final message goes into the run report." ;;
+    *) return 1 ;;
+  esac
+  text="${text//@DELIVERY@/$delivery}"
+  text="${text//@PROTECTED_CHANGE@/$change}"
+  text="${text//@FINAL_MESSAGE@/$final}"
   text="${text//@VERIFY@/$verify}"
   printf '%s\n' "${text//@PROTECTED@/$protected}"
 }
@@ -156,6 +190,14 @@ jig_setting() {
 
 jig_agent_settings() {
   printf 'model: %s, effort: %s' "$(jig_setting "$jig_model" "$jig_model_source")" "$(jig_setting "$jig_effort" "$jig_effort_source")"
+}
+
+jig_delivery() {
+  case "$profile_deliver" in
+    pr) printf 'pr (pushes %s and opens a PR)' "$1" ;;
+    branch) printf branch ;;
+    *) return 1 ;;
+  esac
 }
 
 jig_agent_report() {

@@ -124,3 +124,33 @@ $note" "$tail"
   fi
   printf '%s' "$jig_pr_text"
 }
+
+jig_shell_word() {
+  local re='^[A-Za-z0-9_./=:@%+,-]+$' rest out="" LC_ALL=C
+  if [[ $1 =~ $re ]]; then
+    printf '%s' "$1"
+  else
+    rest="$1"
+    while [[ $rest == *\'* ]]; do
+      out="$out${rest%%\'*}'\\''"
+      rest="${rest#*\'}"
+    done
+    printf "'%s%s'" "$out" "$rest"
+  fi
+}
+
+jig_log_command() {
+  printf 'git -C %s log --oneline %s..%s' "$(jig_shell_word "$1")" "$2" "$3"
+}
+
+jig_diff_command() {
+  printf 'git -C %s diff %s...%s' "$(jig_shell_word "$1")" "$2" "$3"
+}
+
+jig_report_branch() {
+  local repo="$1" branch="$2" commits="$3" base_branch="$4" base="$5" commit_word=commits
+  [ "$commits" != 1 ] || commit_word=commit
+  printf -- '- Repository: %s\n' "$repo"
+  printf -- '- Branch: %s (%s %s)\n' "$branch" "$commits" "$commit_word"
+  printf -- '- Base: %s at %s\n' "$base_branch" "$base"
+}

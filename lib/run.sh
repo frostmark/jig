@@ -43,11 +43,11 @@ export GIT_AUTHOR_NAME="$git_name" GIT_COMMITTER_NAME="$git_name"
 export GIT_AUTHOR_EMAIL="$git_email" GIT_COMMITTER_EMAIL="$git_email"
 
 docker info >/dev/null 2>&1 || jig_fail "Docker is not running"
-gh auth status --hostname github.com >/dev/null 2>&1 || jig_fail "gh is not logged in to github.com: run gh auth login"
 
 jig_repo_identity
 jig_find_overlay
 jig_resolve_base
+[ "$profile_deliver" = branch ] || jig_check_gh
 jig_agent_options
 
 if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$branch"; then
@@ -63,6 +63,7 @@ esac
 
 run="$jig_home/runs/$gh_owner/$gh_name/$slug"
 run_shown="\$JIG_HOME/runs/$gh_owner/$gh_name/$slug"
+[ "$profile_deliver" = pr ] || run_shown="$run"
 [ ! -e "$run" ] || jig_fail "run directory $run already exists: remove it (rm -rf) to reuse the name"
 
 jig_project="jig-run_${docker_repo}_$slug"
@@ -85,10 +86,14 @@ die() {
 }
 
 refuse() {
-  git -C "$repo_root" branch -q -D "$branch" >/dev/null 2>&1 ||
-    echo "$jig_name: could not delete the local branch $branch: delete it by hand" >&2
+  local kept="no local branch $branch was created"
+  if [ "$fetched" = 1 ]; then
+    git -C "$repo_root" branch -q -D "$branch" >/dev/null 2>&1 ||
+      echo "$jig_name: could not delete the local branch $branch: delete it by hand" >&2
+    kept="the local branch $branch was deleted"
+  fi
   fetched=0
-  die "$* Nothing was pushed; the local branch $branch was deleted."
+  die "$* Nothing was pushed; $kept."
 }
 
 contains_cred() {
@@ -203,6 +208,7 @@ jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_setup")" 
 
 prompt="$jig_plan_prompt"
 
+echo "$jig_name: deliver: $(jig_delivery "$branch")"
 echo "$jig_name: agent $(jig_agent_settings)"
 echo "$jig_name: agent running, up to $minutes min (log: $run/claude.log)"
 agent_started=$(date +%s)
@@ -260,7 +266,7 @@ agent_log="$(jig_compose exec -T app node -e "$extract_js" meta <"$run/claude.lo
 [ "$extract_status" != 130 ] || exit 130
 [ "$extract_status" = 0 ] || agent_log=""
 agent_report="$(jig_agent_report "$agent_log")"
-echo "$jig_name: agent: $agent_report"
+echo "$jig_name: agent: ${agent_report//"$cred_value"/[REDACTED]}"
 
 teardown || die "docker compose down failed: remove project $jig_project by hand"
 [ "$jig_interrupted" = 0 ] || exit 130
@@ -273,15 +279,18 @@ if [ "$commits" = 0 ]; then
     echo "$jig_name: the agent left JIG_BLOCKED.md uncommitted: see $run/blocked-worktree.md"
   [ ! -s "$run/status.txt" ] || echo "$jig_name: uncommitted changes were left in the clone: see $run/status.txt"
   [ ! -s "$run/summary.md" ] || echo "$jig_name: the agent's final message: $run/summary.md"
-  die "the agent made no commits on $branch (agent exit $agent_status): nothing was pushed and no PR was opened."
+  [ "$profile_deliver" = branch ] ||
+    die "the agent made no commits on $branch (agent exit $agent_status): nothing was pushed and no PR was opened."
+  die "the agent made no commits on $branch (agent exit $agent_status): no branch was fetched into $repo_root."
 fi
 
-git -C "$repo_root" -c transfer.fsckObjects=true -c fetch.fsckObjects=true \
-  fetch --quiet "$run/branch.bundle" "refs/heads/$branch:refs/heads/$branch" || { rm -f "$run/branch.bundle"; die "could not fetch $branch from the bundle"; }
-fetched=1
-
 g() { git -C "$repo_root" "$@"; }
-tip="$(g rev-parse --verify "refs/heads/$branch^{commit}")" || die "could not resolve $branch"
+g -c transfer.fsckObjects=true -c fetch.fsckObjects=true \
+  fetch --quiet --no-write-fetch-head "$run/branch.bundle" "refs/heads/$branch" || { rm -f "$run/branch.bundle"; die "could not fetch $branch from the bundle"; }
+heads="$(g bundle list-heads "$run/branch.bundle" "refs/heads/$branch")" || die "could not list the heads of $run/branch.bundle"
+tip="${heads%% *}"
+[ "$heads" = "$tip refs/heads/$branch" ] && [[ $tip =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] &&
+  tip="$(g rev-parse --verify --quiet "$tip^{commit}")" || die "could not resolve $branch in $run/branch.bundle"
 g merge-base --is-ancestor "$base" "$tip" || die "$branch does not start from $base_branch ($base)"
 
 g log -p --text --diff-merges=first-parent --format=fuller "$base..$tip" >"$run/branch.patch" ||
@@ -289,17 +298,37 @@ g log -p --text --diff-merges=first-parent --format=fuller "$base..$tip" >"$run/
 g rev-list --objects --no-object-names "$base..$tip" | g cat-file --batch >"$run/branch.objects" ||
   die "could not read the objects of $branch"
 refuse_leaks branch.patch branch.objects summary.md blocked-worktree.md
+g update-ref "refs/heads/$branch" "$tip" "" || die "could not create $branch in $repo_root"
+fetched=1
 
 g log -z --format= --name-only --no-renames --diff-merges=first-parent "$base..$tip" >"$run/touched.z" ||
   die "git log failed on $branch"
 g diff -z --name-only --no-renames "$base" "$tip" >"$run/changed.z" || die "git diff failed on $branch"
-github_paths=0
+github_changed=$'\n'
 while IFS= read -r -d '' f; do
   case "$f" in
-    .github | .github/*) github_paths=1 ;;
+    .github | .github/*) github_changed="$github_changed$f"$'\n' ;;
   esac
-done < <(cat "$run/touched.z" "$run/changed.z")
-[ "$github_paths" = 0 ] ||
+done <"$run/changed.z"
+github=""
+github_count=0
+while IFS= read -r -d '' f; do
+  case "$f" in
+    .github | .github/*) ;;
+    *) continue ;;
+  esac
+  github_count=$(( github_count + 1 ))
+  [ "$github_count" -le "$list_max" ] || continue
+  case "$github_changed" in
+    *$'\n'"$f"$'\n'*) github="$github- \`$(jig_pr_line "$f")\`
+" ;;
+    *) github="$github- \`$(jig_pr_line "$f")\` (changed, then reverted within the branch)
+" ;;
+  esac
+done < <(cat "$run/touched.z" "$run/changed.z" | LC_ALL=C sort -z -u)
+[ "$github_count" -le "$list_max" ] || github="$github- and $(( github_count - list_max )) more
+"
+[ -z "$github" ] || [ "$profile_deliver" = branch ] ||
   refuse "$branch changes paths under .github/ (see $run/branch.patch): a pushed workflow runs with the repository's secrets and write access."
 
 protected=""
@@ -339,6 +368,11 @@ reasons=""
 attention=""
 note() { attention="$attention- $1
 "; }
+if [ -n "$github" ]; then
+  reasons="$reasons .github/;"
+  note "Changes under \`.github/\`, in a commit or in the diff against $base_branch: a pushed workflow runs with the repository's secrets and write access, so review them before you push:
+$(printf '%s' "$github" | sed 's/^/  /')"
+fi
 if [ "$verify_status" != 0 ]; then
   reasons="$reasons $profile_verify red;"
   note "$profile_verify is red (exit $verify_status): see \`$run_shown/verify.log\`."
@@ -377,7 +411,8 @@ if [ -s "$run/status.txt" ]; then
   done <"$run/status.txt"
   [ "$status_count" -le "$list_max" ] || status_lines="$status_lines... and $(( status_count - list_max )) more
 "
-  note "Uncommitted changes were left in the clone; they are not in this PR and $profile_verify ran without them:
+  if [ "$profile_deliver" = pr ]; then delivered="in this PR"; else delivered="on the branch"; fi
+  note "Uncommitted changes were left in the clone; they are not $delivered and $profile_verify ran without them:
 
 \`\`\`
 $status_lines\`\`\`"
@@ -389,16 +424,32 @@ summary="$(jig_pr_excerpt "$jig_pr_summary_max" "$run/summary.md" '' "
 if [ "$verify_status" = 0 ]; then verify_text="green"; else verify_text="red (exit $verify_status)"; fi
 agent_text="exit $agent_status, $agent_report"
 
-body="$run/pr-body.md"
-pr_top="$(
+top_name="PR description"
+[ "$profile_deliver" = pr ] || top_name=report
+top="$(
+  if [ "$profile_deliver" = branch ]; then
+    echo "# $title"
+    echo
+  fi
   if [ -n "$issue_line" ]; then
     echo "$issue_line"
     echo
   fi
+  [ "$profile_deliver" = pr ] || jig_report_branch "$repo_root" "$branch" "$commits" "$base_branch" "$base"
   echo "- $profile_verify: $verify_text"
   echo "- Agent: $agent_text"
   echo "- Duration: $(elapsed "$started") in total, agent $agent_duration (limit $minutes min)"
   echo "- Log: \`$run_shown/claude.log\`"
+  if [ "$profile_deliver" = branch ]; then
+    echo "- Plan: \`$run/plan.md\`"
+    echo
+    echo '```sh'
+    jig_log_command "$repo_root" "$base" "$branch"
+    echo
+    jig_diff_command "$repo_root" "$base" "$branch"
+    echo
+    echo '```'
+  fi
   if [ -n "$attention" ]; then
     echo
     echo "## Needs attention"
@@ -413,8 +464,26 @@ pr_top="$(
   echo "## Agent summary"
   echo
   printf '%s\n' "$summary"
-)" || die "could not compose the PR description"
-jig_pr_body "$run/plan.md" "$run_shown/plan.md" "$pr_top" "🤖 Generated with [Claude Code](https://claude.com/claude-code)" >"$body" ||
+)" || die "could not compose the $top_name"
+
+if [ "$profile_deliver" = branch ]; then
+  report="$run/report.md"
+  printf '%s\n' "$top" >"$report" || die "could not write $report"
+  refuse_leaks plan.md report.md
+  if [ -n "$reasons" ]; then
+    echo "$jig_name: needs attention ($(echo "$reasons" | sed 's/^ //; s/;$//')): $branch in $repo_root"
+  else
+    echo "$jig_name: ready: $branch in $repo_root"
+  fi
+  echo "$jig_name: $profile_verify: $verify_text"
+  echo "$jig_name: report: $report"
+  echo "$jig_name: diff: $(jig_diff_command "$repo_root" "$base" "$branch")"
+  [ -z "$reasons" ] || exit 1
+  exit 0
+fi
+
+body="$run/pr-body.md"
+jig_pr_body "$run/plan.md" "$run_shown/plan.md" "$top" "🤖 Generated with [Claude Code](https://claude.com/claude-code)" >"$body" ||
   die "could not write $body"
 
 refuse_leaks plan.md pr-body.md
