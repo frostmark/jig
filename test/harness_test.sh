@@ -836,7 +836,7 @@ equals "one commit is singular" "$(jig_report_branch /home/dev/shop jig/x 1 deve
   "- Branch: jig/x (1 commit)"
 
 mkdir "$tmp/secrets"
-equals "without secrets nothing is found" "$(jig_contains_secret "$root/README.md"; echo "$?")" 1
+equals "without secrets nothing is found, quietly" "$(jig_contains_secret "$root/README.md" 2>&1; echo "$?")" 1
 equals "without secrets the stream passes as is" "$(printf 'a e2e0dummy0token b\n' | jig_redact_stream)" "a e2e0dummy0token b"
 secret='acme:ghp_e2e/x&y.*[a]^$\1'
 jig_add_secret CLAUDE_CODE_OAUTH_TOKEN e2e0dummy0token
