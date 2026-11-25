@@ -296,7 +296,7 @@ $warnings\`\`\`
 }
 
 jig_fetch_branch() {
-  git -C "$repo_root" fetch --quiet --no-tags origin "+refs/heads/$1:refs/remotes/origin/$1" ||
+  git -C "$repo_root" fetch --quiet --no-tags --no-write-fetch-head origin "+refs/heads/$1:refs/remotes/origin/$1" ||
     jig_fail "git fetch origin $1 failed"
   fetched_rev="$(git -C "$repo_root" rev-parse --verify --quiet "refs/remotes/origin/$1^{commit}")" ||
     jig_fail "git fetch origin $1 did not update origin/$1"

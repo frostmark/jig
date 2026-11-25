@@ -244,12 +244,18 @@ cp -p "$tmp/profile/"* "$target/.jig/"
 echo shop >"$target/README"
 git -C "$target" add -A && git -C "$target" commit -q -m init && git -C "$target" push -q origin main
 base="$(git -C "$origin" rev-parse main)"
+printf '%s\t\tbranch main of the owner\n' "$base" >"$target/.git/FETCH_HEAD"
+owners_fetch_head="$(cat "$target/.git/FETCH_HEAD")"
 runs="$JIG_HOME/runs/acme/shop"
 shown='$JIG_HOME/runs/acme/shop'
 attribution="🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 
 jig() {
   (cd "$target" && "$root/bin/jig" "$@") >"$tmp/out" 2>"$tmp/err"
+}
+
+fetch_head_kept() {
+  equals "$1: FETCH_HEAD in the target checkout is still the owner's" "$(cat "$target/.git/FETCH_HEAD")" "$owners_fetch_head"
 }
 
 nothing_pushed() {
@@ -380,6 +386,7 @@ jig/add-health
 --title
 Add a health file"
 lacks "the clean PR is not a draft" "$tmp/gh/add-health.args" --draft
+fetch_head_kept add-health
 body="$tmp/gh/add-health.body"
 equals "the PR body starts with Fixes for the plan's issue, then verify and the agent with its model and effort" \
   "$(sed -n 1,4p "$body")" "Fixes #12
@@ -422,6 +429,7 @@ equals "the uncommitted JIG_BLOCKED.md is kept" "$(cat "$runs/nothing-to-do/bloc
 checks=$(( checks + 1 ))
 [ ! -e "$runs/nothing-to-do/verify.log" ] || fail "a run without commits runs no final verify"
 nothing_pushed nothing-to-do
+fetch_head_kept nothing-to-do
 
 printf '# Keep the placeholder\n\nIssue: <ref>\n\nWrite ok to health.txt.\n' >"$tmp/plans/placeholder.md"
 jig run "$tmp/plans/placeholder.md"
@@ -507,6 +515,7 @@ equals "pr delivery of a branch that changes .github/ exits 3" "$?" 3
 has_line "pr delivery refuses a branch that changes .github/" "$tmp/err" \
   "jig: jig/github-pr changes paths under .github/ (see $runs/github-pr/branch.patch): a pushed workflow runs with the repository's secrets and write access. Nothing was pushed; the local branch jig/github-pr was deleted."
 nothing_pushed github-pr
+fetch_head_kept github-pr
 
 mkdir -p "$JIG_PROFILES/acme/shop"
 printf 'base main\nsetup .jig/setup\nverify .jig/verify\nmodel opus\neffort high\n' >"$JIG_PROFILES/acme/shop/config"
@@ -555,6 +564,7 @@ jig run "$tmp/plans/branch-health.md"
 equals "a clean branch run exits 0" "$?" 0
 handed_over branch-health 1 health.txt
 no_gh "a clean branch run"
+fetch_head_kept branch-health
 has_line "branch delivery tells the agent that jig hands the branch over" "$runs/branch-health/system-prompt.md" \
   "- Commit on the current branch, in small commits. Do not push: jig hands the branch to the owner."
 report="$runs/branch-health/report.md"
@@ -640,6 +650,7 @@ grep -q -F "jig: the CLAUDE_CODE_OAUTH_TOKEN value was found in: report.md (bran
   fail "the credential in an uncommitted file name is found in the report: $(cat "$tmp/err")"
 nothing_pushed branch-leak
 no_gh "a branch run with the credential"
+fetch_head_kept branch-leak
 has_line "the report is redacted in the run directory" "$runs/branch-leak/report.md" "?? [REDACTED].txt"
 
 checks=$(( checks + 1 ))

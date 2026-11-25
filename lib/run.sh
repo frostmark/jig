@@ -280,7 +280,7 @@ if [ "$commits" = 0 ]; then
 fi
 
 git -C "$repo_root" -c transfer.fsckObjects=true -c fetch.fsckObjects=true \
-  fetch --quiet "$run/branch.bundle" "refs/heads/$branch:refs/heads/$branch" || { rm -f "$run/branch.bundle"; die "could not fetch $branch from the bundle"; }
+  fetch --quiet --no-write-fetch-head "$run/branch.bundle" "refs/heads/$branch:refs/heads/$branch" || { rm -f "$run/branch.bundle"; die "could not fetch $branch from the bundle"; }
 fetched=1
 
 g() { git -C "$repo_root" "$@"; }

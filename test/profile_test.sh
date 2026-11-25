@@ -363,7 +363,9 @@ new_origin
 write_profile "$(profile_of main 'deploy/*')"
 publish main
 git clone -q "$tmp/origin.git" "$target"
+printf "the owner's fetch\n" >"$target/.git/FETCH_HEAD"
 equals "the default branch names itself" "$(resolved)" "$last main deploy/*"
+equals "fetching the base leaves the target's FETCH_HEAD alone" "$(cat "$target/.git/FETCH_HEAD")" "the owner's fetch"
 
 new_origin
 w commit -q --allow-empty -m "no profile"

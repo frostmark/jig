@@ -20,7 +20,9 @@ repository's own instructions, the engine rules and your personal overlay (see [
    the host may be in any case. Owner and name keep the URL's spelling, and they name the overlay
    directory, the run directories and the compose projects, so use GitHub's spelling, as its clone button
    gives it. Any other `origin` stops jig with exit code 2 before anything runs. jig fetches from `origin`
-   and checks that `jig/<slug>` is not there yet with the host's git credentials.
+   and checks that `jig/<slug>` is not there yet with the host's git credentials. Its fetches update
+   `origin/<base>` and never write `FETCH_HEAD`, so a `git pull` or `git merge FETCH_HEAD` of yours is not
+   redirected by a run.
 3. `gh auth login`, for `deliver pr` (the default) only: jig pushes the branch with a plain
    `git push origin` (`gh` can serve the git credentials as a credential helper) and opens the PR with
    `gh pr create`. Before anything runs it asks `gh repo view <origin URL>` for the repository's name,
@@ -634,7 +636,7 @@ the terminal and in the PR, and the PR description (`lib/pr.sh`): the plan block
 is cut, the caps on the agent's texts and lists, the last guard on the description's size, the
 issue line read from the plan with its launch text, the refused placeholder and the warnings for Issue
 lines that are not read, and the branch lines and the shell-quoted commands of `report.md`.
-Both need bash and git 2.28 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
+Both need bash and git 2.29 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
 
 `test/run_e2e.sh` runs `jig smoke` and twelve `jig run`s end to end against a local bare repository that
