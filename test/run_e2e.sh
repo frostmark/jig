@@ -107,6 +107,23 @@ check() {
   say "check failed: $1"
   exit 5
 }
+if grep -q '^CHECK-SECRETS ' /jig/plan.md; then
+  say "secrets check: $(node -e 'const crypto = require("crypto"), fs = require("fs"), path = require("path");
+    const want = process.argv[1], hash = (b) => crypto.createHash("sha256").update(b).digest("hex");
+    let files = "absent";
+    if (fs.existsSync("/run/secrets")) {
+      const found = [];
+      const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walk(p); else found.push(p + (hash(fs.readFileSync(p)) === want ? " holds the value" : ""));
+      } };
+      walk("/run/secrets");
+      files = found.join(" ") || "empty";
+    }
+    process.stdout.write(`E2E_BUILD_SECRET ${"E2E_BUILD_SECRET" in process.env ? "set" : "unset"}, ` +
+      `value in the environment: ${Object.values(process.env).some((v) => hash(v) === want) ? "yes" : "no"}, /run/secrets: ${files}`)' \
+    "$(sed -n 's/^CHECK-SECRETS //p' /jig/plan.md)")"
+fi
 init_model=claude-fake-1
 if grep -q -x MODEL-TOKEN /jig/plan.md 2>/dev/null; then init_model="$CLAUDE_CODE_OAUTH_TOKEN"; fi
 node -e 'process.stdout.write(JSON.stringify({ type: "system", subtype: "init", model: process.argv[1] }) + "\n")' "$init_model"
@@ -256,7 +273,20 @@ cat >"$tmp/bin/fake-ssh" <<'EOF'
 [ "$1" = git@github.com ] || { echo "fake ssh: unexpected host $1" >&2; exit 1; }
 cd "$FAKE_SSH_ROOT" && exec sh -c "$2"
 EOF
-chmod +x "$tmp/bin/gh" "$tmp/bin/fake-ssh"
+real_docker="$(command -v docker)"
+cat >"$tmp/bin/docker" <<EOF
+#!/bin/sh
+if [ -n "\${E2E_CALLS:-}" ]; then
+  case "\${E2E_BUILD_SECRET-}" in
+    "") secret="" ;;
+    jig_build_secret_marker_*) secret=marker ;;
+    *) secret=secret ;;
+  esac
+  printf '%s|docker %s\\n' "\$secret" "\$*" >>"\$E2E_CALLS"
+fi
+exec "$real_docker" "\$@"
+EOF
+chmod +x "$tmp/bin/gh" "$tmp/bin/fake-ssh" "$tmp/bin/docker"
 
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL ANTHROPIC_API_KEY BUILDX_BUILDER E2E_BUILD_SECRET
@@ -285,7 +315,7 @@ shown='$JIG_HOME/runs/acme/shop'
 attribution="🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 
 jig() {
-  (cd "$target" && "$root/bin/jig" "$@") >"$tmp/out" 2>"$tmp/err"
+  (cd "$target" && E2E_CALLS="$tmp/calls" "$root/bin/jig" "$@") >"$tmp/out" 2>"$tmp/err"
 }
 
 fetch_head_kept() {
@@ -796,6 +826,14 @@ equals "a smoke whose compose project resolves a build secret into another varia
 equals "the resolved build secret is named as the last thing on the terminal" "$(tail -n 1 "$tmp/err")" \
   "jig: the value of the build secret E2E_BUILD_SECRET reaches the compose project (docker compose config resolves \${E2E_BUILD_SECRET} in it: in an environment value, a build arg, a label or elsewhere): jig never passes a build secret into a container. The build gets it from a top-level secret with environment: E2E_BUILD_SECRET"
 no_secret "$tmp/out" "$tmp/err"
+sed 's|^      HOME: /tmp$|      HOME: /tmp\
+    secrets:\
+      - e2e|' "$tmp/compose-build.yml" >"$overlay/compose.yml"
+(export E2E_RUN=$build_id-runtime && jig smoke)
+equals "a smoke whose app service takes the build secret as a runtime secret exits 2" "$?" 2
+equals "the runtime secret is named as the last thing on the terminal" "$(tail -n 1 "$tmp/err")" \
+  "jig: the build secret E2E_BUILD_SECRET reaches the service app as its runtime secret e2e (the top-level secret e2e takes environment: E2E_BUILD_SECRET): jig never passes a build secret into a container. Remove e2e from the service's secrets; the build gets it under build: secrets:"
+lacks "the runtime secret stops smoke before the build" "$tmp/out" "building app"
 cp "$tmp/compose-build.yml" "$overlay/compose.yml"
 
 (export E2E_RUN=$build_id-disk JIG_MIN_FREE_GB=999999 && jig smoke)
@@ -886,9 +924,26 @@ checks=$(( checks + 1 ))
 equals "another repository's dangling image stays" "$(image_id "$other_old")" "$other_old"
 leak_image="$(image_id "$built")"
 
-printf '# Add a health file\n\nWrite ok to health.txt.\n' >"$tmp/plans/build-health.md"
+if command -v sha256sum >/dev/null 2>&1; then
+  build_sha="$(printf '%s' "$build_secret" | sha256sum | cut -d' ' -f1)"
+else
+  build_sha="$(printf '%s' "$build_secret" | shasum -a 256 | cut -d' ' -f1)"
+fi
+printf '# Add a health file\n\nWrite ok to health.txt.\n\nCHECK-SECRETS %s\n' "$build_sha" >"$tmp/plans/build-health.md"
+rm -f "$tmp/calls"
 (export E2E_RUN=$build_id-health && jig run "$tmp/plans/build-health.md")
 equals "a clean run that builds exits 0" "$?" 0
+checks=$(( checks + 1 ))
+grep -q -F '"msg":"secrets check: E2E_BUILD_SECRET unset, value in the environment: no, /run/secrets: absent"' "$runs/build-health/claude.log" ||
+  fail "the agent's container has neither the build secret's variable nor its value: $(grep 'secrets check' "$runs/build-health/claude.log")"
+equals "of the compose commands only the build gets the build secret, config gets jig's marker and up runs without either" \
+  "$(grep '|docker compose ' "$tmp/calls" | sed -E 's/^([a-z]*)\|docker compose -p jig-run_acme_shop_build-health( -f [^ ]+)+ ([a-z]+).*/\1 \3/' | LC_ALL=C sort -u)" \
+  " down
+ exec
+ restart
+ up
+marker config
+secret build"
 handed_over build-health 1 health.txt
 no_gh "a clean run that builds"
 checks=$(( checks + 1 ))

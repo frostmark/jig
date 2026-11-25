@@ -37,7 +37,7 @@ jig_valid_build_secret() {
   local re='^[A-Z_][A-Z0-9_]*$' LC_ALL=C
   [[ $1 =~ $re ]] || return 1
   case "$1" in
-    JIG_* | CLAUDE_CODE_OAUTH_TOKEN | ANTHROPIC_API_KEY | GIT_AUTHOR_NAME | GIT_AUTHOR_EMAIL | GIT_COMMITTER_NAME | GIT_COMMITTER_EMAIL) return 2 ;;
+    JIG_* | CLAUDE_CODE_OAUTH_TOKEN | ANTHROPIC_API_KEY | GIT_* | PATH | HOME | USER | SHELL | TMPDIR | LANG | LC_* | BUILDX_* | DOCKER_* | COMPOSE_*) return 2 ;;
   esac
 }
 
@@ -101,7 +101,7 @@ jig_parse_profile() {
         jig_valid_build_secret "$value" || status=$?
         case "$status" in
           1) jig_fail "$label:$n: build-secret must be an environment variable name of capital latin letters, digits and _, not starting with a digit" ;;
-          2) jig_fail "$label:$n: build-secret cannot be $value: jig sets or passes the model credential, the git author and committer and the JIG_ variables itself" ;;
+          2) jig_fail "$label:$n: build-secret cannot be $value: jig sets or passes it itself (JIG_*, GIT_*, the model credential), or jig, git and Docker rely on it (PATH, HOME, USER, SHELL, TMPDIR, LANG, LC_*, BUILDX_*, DOCKER_*, COMPOSE_*), and jig removes a build secret from its environment once it has read it" ;;
         esac
         for i in ${profile_build_secrets[@]+"${!profile_build_secrets[@]}"}; do
           [ "${profile_build_secrets[i]}" != "$value" ] ||

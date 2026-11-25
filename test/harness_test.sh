@@ -938,6 +938,10 @@ unset E2E_UNSET
 equals "build secrets join the secrets with their values, a backslash also in its JSON form" "$(read_secrets E2E_A E2E_B)" \
   "E2E_A|E2E_B|E2E_B|acme:ghp_x/y&z|[a]*?\\1|[a]*?\\\\1|"
 equals "no build secrets add nothing" "$( (profile_build_secrets=() && jig_read_build_secrets && echo "${#jig_secret_values[@]}") 2>&1)" 0
+equals "a build secret leaves jig's environment once read, and jig keeps its value for the build" \
+  "$( (export E2E_KEEP=unrelated && profile_build_secrets=(E2E_A E2E_B) && jig_read_build_secrets &&
+    printf '%s|' "${E2E_A-unset}" "${E2E_B-unset}" "$(env | grep -c -e '^E2E_A=' -e '^E2E_B=')" "${E2E_KEEP-unset}" "${jig_build_values[@]}") 2>&1)" \
+  'unset|unset|0|unrelated|acme:ghp_x/y&z|[a]*?\1|'
 exits_2 "an unset build secret stops jig and names it" \
   "jig: the profile's build-secret E2E_UNSET is not set: export E2E_UNSET before jig builds (jig hands its value only to docker compose, for the build)" \
   read_secrets E2E_A E2E_UNSET
@@ -1101,6 +1105,42 @@ sed 's/"HOME": "\/tmp",/"TOKEN": "x@E2E_SECRET@y",/' "$tmp/compose/build.json" >
 sed 's/"E2E_SECRET": "uid"/"UID": "@E2E_SECRET@"/' "$tmp/compose/build.json" >"$tmp/compose/arg_value.json"
 sed '/"worker": {/,/^    }$/d; s/^    "db.1": {/    "worker": {/; /^      "build": {/,/^      },$/d' "$tmp/compose/build.json" >"$tmp/compose/no_build.json"
 sed 's/"app": {/"web": {/' "$tmp/compose/build.json" >"$tmp/compose/no_app.json"
+sed -e 's/^  "name": "jig-run_acme_shop_x",$/  "configs": {\
+    "c_key": {\
+      "name": "jig-run_acme_shop_x_c_key",\
+      "environment": "E2E_KEY"\
+    },\
+    "c_other": {\
+      "name": "jig-run_acme_shop_x_c_other",\
+      "environment": "E2E_OTHER"\
+    }\
+  },\
+&/' -e 's/^      "environment": "E2E_SECRET"$/&\
+    },\
+    "s_other": {\
+      "name": "jig-run_acme_shop_x_s_other",\
+      "environment": "E2E_OTHER"\
+    },\
+    "s_file": {\
+      "name": "jig-run_acme_shop_x_s_file",\
+      "file": "\/srv\/E2E_SECRET"/' -e 's/^      "image": "acme-shop-jig",$/&\
+      "secrets": [\
+        {\
+          "source": "s_other",\
+          "target": "\/run\/secrets\/s_other"\
+        },\
+        {\
+          "source": "s_file",\
+          "target": "\/run\/secrets\/s_file"\
+        }\
+      ],/' -e 's/^    "db.1": {$/&\
+      "configs": [\
+        {\
+          "source": "c_other"\
+        }\
+      ],/' "$tmp/compose/build.json" >"$tmp/compose/runtime.json"
+sed 's/"source": "s_other",/"source": "E2E_SECRET",/' "$tmp/compose/runtime.json" >"$tmp/compose/runtime_secret.json"
+sed '/^    "db.1": {$/,/^    }/s/"source": "c_other"/"source": "c_key"/' "$tmp/compose/runtime.json" >"$tmp/compose/runtime_config.json"
 sed 's/"db.1": {/"db 1": {/' "$tmp/compose/build.json" >"$tmp/compose/bad_name.json"
 sed 's/"services": {/"services":{/' "$tmp/compose/build.json" >"$tmp/compose/no_services.json"
 docker() {
@@ -1153,6 +1193,15 @@ equals "a build secret's value in another variable is refused" "$(inspect)" \
 fixture=arg_value
 equals "a build secret's value in a build arg is refused" "$(inspect | cut -d: -f1)" \
   "refused|the value of the build secret E2E_SECRET reaches the compose project (docker compose config resolves \${E2E_SECRET} in it"
+fixture=runtime
+equals "runtime secrets and configs that take no build secret pass" "$(inspect)" \
+  "ok|app worker|-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml -f $tmp/compose/compose.build.yml"
+fixture=runtime_secret
+equals "a runtime secret that takes a build secret is refused" "$(inspect)" \
+  "refused|the build secret E2E_SECRET reaches the service app as its runtime secret E2E_SECRET (the top-level secret E2E_SECRET takes environment: E2E_SECRET): jig never passes a build secret into a container. Remove E2E_SECRET from the service's secrets; the build gets it under build: secrets:"
+fixture=runtime_config
+equals "a config that takes a build secret is refused" "$(inspect)" \
+  "refused|the build secret E2E_KEY reaches the service db.1 as its runtime config c_key (the top-level config c_key takes environment: E2E_KEY): jig never passes a build secret into a container. Remove c_key from the service's configs; the build gets it under build: secrets:"
 fixture=no_app
 equals "a project without the app service is refused" "$(inspect)" "refused|docker compose config shows no service app"
 fixture=bad_name
@@ -1164,7 +1213,7 @@ equals "a failing docker compose config is refused" "$(inspect)" "refused|docker
 unset fixture config_text
 
 docker() {
-  printf '%s\n' "$*" >>"$tmp/docker.calls"
+  printf '%s%s\n' "$*" "$( [ "${NPM_TOKEN-}" != "$secret" ] || printf ' (NPM_TOKEN set)')" >>"$tmp/docker.calls"
   case "$1 $2" in
     "compose -p")
       printf 'build step 1\nbuild sees %s\n' "$secret"
@@ -1182,9 +1231,11 @@ build() {
     jig_project=jig-run_acme_shop_x gh_repo=acme/shop jig_builder_text="desktop-linux, the builder of the Docker context"
     jig_compose_files=(-f /srv/compose.yml)
     jig_secret_names=(NPM_TOKEN) jig_secret_values=("$secret")
+    profile_build_secrets=(NPM_TOKEN) jig_build_values=("$secret")
     jig_build_services=("$@")
     jig_build "$tmp/compose/build.log"
     echo "status $?"
+    [ -z "${NPM_TOKEN+set}" ] || echo "NPM_TOKEN stays set after the build"
   ) 2>&1
 }
 build_status=0 prune=some
@@ -1194,8 +1245,9 @@ build step 1
 build sees [REDACTED]
 jig: removed the dangling images labelled jig.repo=acme/shop (reclaimed 1.5MB)
 status 0"
-equals "docker builds the project and prunes only the repository's dangling images" "$(cat "$tmp/docker.calls")" \
-  "compose -p jig-run_acme_shop_x -f /srv/compose.yml build
+equals "docker builds the project with the build secret in its environment and prunes only the repository's dangling images without it" \
+  "$(cat "$tmp/docker.calls")" \
+  "compose -p jig-run_acme_shop_x -f /srv/compose.yml build (NPM_TOKEN set)
 image prune -f --filter label=jig.repo=acme/shop"
 equals "build.log has the redacted build output and the prune output" "$(cat "$tmp/compose/build.log")" "build step 1
 build sees [REDACTED]
@@ -1214,7 +1266,7 @@ status 0"
 equals "the prune's error is in build.log" "$(tail -n 1 "$tmp/compose/build.log")" "prune failed"
 build_status=17 prune=some
 equals "a failing build returns its code and prunes nothing" "$(build app | tail -n 1; cat "$tmp/docker.calls")" "status 17
-compose -p jig-run_acme_shop_x -f /srv/compose.yml build"
+compose -p jig-run_acme_shop_x -f /srv/compose.yml build (NPM_TOKEN set)"
 unset -f docker
 unset build_status prune
 

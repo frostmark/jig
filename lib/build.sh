@@ -1,5 +1,6 @@
 jig_min_free_re='^(0|[1-9][0-9]{0,5})$'
 jig_build_services=()
+jig_build_values=()
 jig_compose_problem=""
 
 jig_use_builder() {
@@ -49,8 +50,18 @@ jig_read_build_secrets() {
     [[ $value != *[[:cntrl:]]* ]] ||
       jig_fail "the value of the build secret $name has a line break or another control character, which jig cannot look for in its logs"
     jig_add_secret "$name" "$value"
+    jig_build_values+=("$value")
+    unset "$name"
   done
 }
+
+jig_with_build_secrets() (
+  local i
+  for i in ${profile_build_secrets[@]+"${!profile_build_secrets[@]}"}; do
+    export "${profile_build_secrets[i]}=${jig_build_values[i]}"
+  done
+  "$@"
+)
 
 jig_build_secret_marker() {
   printf 'jig_build_secret_marker_%s' "$1"
@@ -64,16 +75,30 @@ jig_is_build_secret() {
   return 1
 }
 
-jig_compose_facts_awk='$0 == "  \"services\": {" { inside = 1; found = 1; next }
-inside && /^  }/ { inside = 0; next }
-!inside { next }
-/^    "[A-Za-z0-9._-]+": \{$/ { svc = $0; sub(/^    "/, "", svc); sub(/": \{$/, "", svc); env = 0; print "service " svc; next }
+jig_compose_facts_awk='/^  "[^"]+": \{$/ { block = $0; sub(/^  "/, "", block); sub(/": \{$/, "", block); if (block == "services") found = 1; next }
+/^  }/ { block = ""; next }
+block == "secrets" || block == "configs" {
+  if ($0 ~ /^    "[A-Za-z0-9._-]+": \{$/) { key = $0; sub(/^    "/, "", key); sub(/": \{$/, "", key) }
+  else if ($0 ~ /^      "environment": "[^"\\]+",?$/) { name = $0; sub(/^      "environment": "/, "", name); sub(/",?$/, "", name); source[block, key] = name }
+  next
+}
+block != "services" { next }
+/^    "[A-Za-z0-9._-]+": \{$/ { svc = $0; sub(/^    "/, "", svc); sub(/": \{$/, "", svc); env = 0; list = ""; print "service " svc; next }
 /^    [^ }]/ { bad = 1; next }
 /^      "build": \{/ { print "build " svc; next }
 $0 == "      \"environment\": {" { env = 1; next }
 env && /^      }/ { env = 0; next }
-env && /^        "[^"\\]+": / { key = $0; sub(/^        "/, "", key); sub(/": .*$/, "", key); print "env " svc " " key }
-END { if (!found || bad) exit 1 }'
+env && /^        "[^"\\]+": / { key = $0; sub(/^        "/, "", key); sub(/": .*$/, "", key); print "env " svc " " key; next }
+$0 == "      \"secrets\": [" || $0 == "      \"configs\": [" { list = $0; sub(/^      "/, "", list); sub(/": \[$/, "", list); next }
+list && /^      ]/ { list = ""; next }
+list && /^          "source": "[A-Za-z0-9._-]+",?$/ { key = $0; sub(/^          "source": "/, "", key); sub(/",?$/, "", key); uses[++n] = list " " svc " " key }
+END {
+  if (!found || bad) exit 1
+  for (i = 1; i <= n; i++) {
+    split(uses[i], u, " ")
+    if ((u[1], u[3]) in source) print "runtime " u[2] " " u[1] " " u[3] " " source[u[1], u[3]]
+  }
+}'
 
 jig_write_build_compose() {
   local service
@@ -89,7 +114,7 @@ jig_write_build_compose() {
 }
 
 jig_check_compose() {
-  local dir="$1" config facts kind service name app=0
+  local dir="$1" config facts kind service name source variable app=0
   jig_build_services=()
   jig_compose_problem=""
   config="$(
@@ -105,13 +130,18 @@ jig_check_compose() {
     jig_compose_problem="could not read the services from docker compose config --format json"
     return 1
   }
-  while IFS=' ' read -r kind service name; do
+  while IFS=' ' read -r kind service name source variable; do
     case "$kind" in
       service) [ "$service" != app ] || app=1 ;;
       build) jig_build_services+=("$service") ;;
       env)
         if jig_is_build_secret "$name"; then
           jig_compose_problem="the build secret $name is in the environment of the service $service (docker compose config): jig never passes a build secret into a container. Remove it from the service's environment and env_file; the build gets it from a top-level secret with environment: $name"
+          return 1
+        fi ;;
+      runtime)
+        if jig_is_build_secret "$variable"; then
+          jig_compose_problem="the build secret $variable reaches the service $service as its runtime ${name%s} $source (the top-level ${name%s} $source takes environment: $variable): jig never passes a build secret into a container. Remove $source from the service's $name; the build gets it under build: secrets:"
           return 1
         fi ;;
     esac
@@ -153,7 +183,7 @@ jig_build() {
   local log="$1" status=0
   [ "${#jig_build_services[@]}" -gt 0 ] || return 0
   echo "$jig_name: building ${jig_build_services[*]} with $jig_builder_text (log: $log)"
-  jig_compose build 2>&1 | jig_redact_stream | tee "$log" || status=$?
+  jig_with_build_secrets jig_compose build 2>&1 | jig_redact_stream | tee "$log" || status=$?
   [ "$status" = 0 ] || return "$status"
   jig_prune_images "$log"
 }

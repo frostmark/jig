@@ -98,7 +98,7 @@ file on the host.
 | `model` | optional, once | The model the agent runs on, passed to Claude Code as `--model`: an alias such as `opus` or `sonnet[1m]`, or a full model name. Latin letters, digits, `.`, `_`, `:`, `@`, `/`, `[`, `]`, `-`, starting with a letter or digit, at most 100 characters. `JIG_MODEL` replaces it for one run. Without either, jig passes no `--model` and Claude Code's default applies. `jig smoke` checks the value and does not use it. |
 | `effort` | optional, once | The reasoning effort, passed to Claude Code as `--effort`: `low`, `medium`, `high`, `xhigh` or `max`. `JIG_EFFORT` replaces it for one run. Without either, jig passes no `--effort` and Claude Code's default applies. |
 | `deliver` | optional, once | How the branch is delivered: `pr` (the default) pushes it and opens a pull request, `branch` leaves it in your checkout with a report and pushes nothing (see [Branch delivery](#branch-delivery)). `jig smoke` checks the value and does not use it. |
-| `build-secret` | any number | The name of an environment variable whose value the image build needs, a token for a private package registry for example: capital latin letters, digits and `_`, not starting with a digit. Names starting with `JIG_`, the model credential's variables and the git author and committer variables are refused, and so is a name declared twice. See [Build secrets](#build-secrets). |
+| `build-secret` | any number | The name of an environment variable whose value the image build needs, a token for a private package registry for example: capital latin letters, digits and `_`, not starting with a digit. Names jig sets or passes itself (`JIG_*`, `GIT_*`, the model credential's variables) and names jig, git and Docker rely on (`PATH`, `HOME`, `USER`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `BUILDX_*`, `DOCKER_*`, `COMPOSE_*`) are refused, and so is a name declared twice. See [Build secrets](#build-secrets). |
 
 An unknown key, a missing required key, a repeated `base`, `setup`, `verify`, `model`, `effort` or `deliver`, a
 `build-secret` name declared twice, or a value outside its character set stops jig with exit code 2 before anything runs; the message names the file and the line,
@@ -308,12 +308,15 @@ Then `jig run` and `jig smoke`:
   environment that starts jig, or its value holds a line break or another control character; the message
   names the variable, never its value. BuildKit leaves secrets out of the build cache's key, so without this
   check a missing secret would fail only a build whose cache is cold;
+- remove each declared variable from jig's own environment once they have read it, and hand the values
+  only to `docker compose build`: `docker compose up` and every command after it run without them;
 - stop with exit code 2 before the build when the compose project, as `docker compose config` resolves the
   profile's compose file and jig's own, has a declared name as a key in a service's `environment` (an
-  `env_file` included), or resolves the variable anywhere else (`${BUNDLE_GITHUB__COM}` in another
-  variable, a build arg or a label). jig reads that project with a marker in place of each value, so the
-  value is never in what it reads. A build secret reaches no container: only `docker compose build` reads
-  it;
+  `env_file` included), hands it to a service at runtime (a top-level secret or config with
+  `environment: BUNDLE_GITHUB__COM` listed in the service's own `secrets` or `configs`, not under its
+  `build`), or resolves the variable anywhere else (`${BUNDLE_GITHUB__COM}` in another variable, a build
+  arg or a label). jig reads that project with a marker in place of each value, so the value is never in
+  what it reads. So a build secret reaches no container: only `docker compose build` gets it;
 - look for each value as for the model credential: the branch is not kept or pushed when it carries one
   (see [Usage](#usage)), and the run directory's logs get `[REDACTED]` in its place. The build's output is
   redacted before it reaches the terminal and `build.log`, so a `RUN` step that prints a secret shows
@@ -495,14 +498,14 @@ removes its build cache.
 What `jig run` does: precondition checks (the free disk and the builder among them) → the owner and name
 from the URL of `origin` → the overlay lookup → the base and the profile (`.jig/` of `origin/<base>` with
 the overlay's profile files over it) → with `deliver pr`, `gh`'s login and its name for the repository →
-the build secrets in the environment → the profile and harness sources printed →
+the build secrets read from the environment and removed from it → the profile and harness sources printed →
 the profile and the plan's copy written to the run directory → the plan's Issue line read and printed →
 the system prompt and the compose overrides written to the run directory → `docker compose config`
 checked for build secrets (a refusal removes the run directory) →
 a clone of that commit in `$JIG_HOME/runs/<owner>/<repo>/<slug>/repo` → compose project
 `jig-run_<owner>_<repo>_<slug>` (no ports on the host; owner and repo lowercased, characters other than
-latin letters, digits and `-` turned into `-`): `docker compose build` when a service builds, its output
-on the terminal and in `build.log`, then the removal of the repository's dangling images, then
+latin letters, digits and `-` turned into `-`): `docker compose build` when a service builds, the only
+command that gets the build secrets, its output on the terminal and in `build.log`, then the removal of the repository's dangling images, then
 `docker compose up --wait --no-build` → the branch `jig/<slug>` and `setup` in the container →
 `claude -p` under the time limit, with `--model` and `--effort` when set → the branch leaves the container as a bundle → uncommitted changes are
 discarded (`git checkout -f`, `git clean -fd`, also in the middle of an abandoned merge or rebase) and
@@ -748,14 +751,15 @@ lines that are not read, and the branch lines and the shell-quoted commands of `
 It also checks the host safety of `lib/build.sh` and `lib/common.sh`: the scan and the redaction of the
 credential and the build secrets (values with `:`, `/`, `&`, regex and glob characters, near misses,
 overlapping values, the JSON form, a stream redacted line by line as it comes), the build secrets read from
-the environment, the builder of the Docker context or `BUILDX_BUILDER`, the disk check against a stand-in
-`df` and `docker`, reading `docker compose config` (a build secret's name in a service's environment or its
-value resolved anywhere, the services that build, jig's label file) and the build with its log and the
-prune against a stand-in `docker`.
+the environment and removed from it, the builder of the Docker context or `BUILDX_BUILDER`, the disk check against a stand-in
+`df` and `docker`, reading `docker compose config` (a build secret's name in a service's environment, a
+runtime secret or config that takes it, its value resolved anywhere, the services that build, jig's label
+file) and the build with its log and the prune against a stand-in `docker` that records which calls get
+the build secret.
 Both need bash and git 2.29 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
 
-`test/run_e2e.sh` runs seven `jig smoke`s and twenty `jig run`s end to end against a local bare repository that
+`test/run_e2e.sh` runs eight `jig smoke`s and twenty `jig run`s end to end against a local bare repository that
 `origin`, `git@github.com:acme/shop.git`, reaches through a fake `ssh` (`GIT_SSH_COMMAND`), with a
 fake `claude` mounted over `/usr/local/bin/claude` (it records its arguments and names a model in its
 log) and a fake `gh` on `PATH` that records its calls, so it needs no credential and no network. With
@@ -773,12 +777,14 @@ credential, and a log that names the credential as the model (the terminal shows
 After clean, refused and stopped runs alike, the target checkout's `FETCH_HEAD` is still the one the
 test wrote before them. Then an overlay profile builds an image from `JIG_E2E_IMAGE` with a build secret
 whose value has `:`, `/`, `&` and regex characters and that a `RUN` step prints: an unset or empty secret,
-the secret's name in the `app` environment and its value resolved into another variable stop jig before
-the build, and so do too little disk (`JIG_MIN_FREE_GB`) and an invalid `JIG_MIN_FREE_GB`; a
+the secret's name in the `app` environment, its value resolved into another variable and the secret
+handed to `app` as a runtime secret stop jig before the build, and so do too little disk (`JIG_MIN_FREE_GB`) and an invalid `JIG_MIN_FREE_GB`; a
 `BUILDX_BUILDER` that is set is the builder compose uses, and without it the Docker context's; the build's
 output is redacted on the terminal and in `build.log`, the image carries `jig.repo=acme/shop`, a green
 smoke removes its clone and a red one keeps it; a plan that carries the secret is refused with
-`claude.log` redacted; each rebuild removes the image it left dangling while another repository's dangling
+`claude.log` redacted; in a clean run the agent's container has neither the secret's variable nor its
+value in its environment or under `/run/secrets`, and of the compose commands only the build gets the
+value (a `docker` on `PATH` records each call and whether the variable is set); each rebuild removes the image it left dangling while another repository's dangling
 image stays. It also reads made-up
 `claude.log`s with `lib/agent-log.js` in the image, values out of shape and past their limits among them. It runs only when
 `JIG_E2E_IMAGE` names a local image with bash, git, node and `timeout` (it is never pulled) and Docker is

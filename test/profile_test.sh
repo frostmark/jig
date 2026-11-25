@@ -234,11 +234,13 @@ for name in npm_token NPM-TOKEN 1NPM NPM.TOKEN 'NPM$TOKEN' 'NPM;id' NPM_TOKÉN N
 build-secret $name" "cfg:4: build-secret must be an environment variable name of capital latin letters, digits and _, not starting with a digit"
 done
 for name in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL \
-  JIG_BASE JIG_WORKSPACE JIG_; do
-  refused "build-secret $name is jig's own" "$valid
-build-secret $name" "cfg:4: build-secret cannot be $name: jig sets or passes the model credential, the git author and committer and the JIG_ variables itself"
+  GIT_TOKEN GIT_ JIG_BASE JIG_WORKSPACE JIG_ PATH HOME USER SHELL TMPDIR LANG LC_ALL LC_CTYPE LC_ \
+  BUILDX_BUILDER BUILDX_ DOCKER_HOST DOCKER_CONFIG DOCKER_ COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_; do
+  refused "build-secret $name is a name jig, git or Docker relies on" "$valid
+build-secret $name" "cfg:4: build-secret cannot be $name: jig sets or passes it itself (JIG_*, GIT_*, the model credential), or jig, git and Docker rely on it (PATH, HOME, USER, SHELL, TMPDIR, LANG, LC_*, BUILDX_*, DOCKER_*, COMPOSE_*), and jig removes a build secret from its environment once it has read it"
 done
-for name in GIT_TOKEN CLAUDE_CODE_OAUTH_TOKEN_2 XJIG_TOKEN ANTHROPIC_API_KEYS; do
+for name in CLAUDE_CODE_OAUTH_TOKEN_2 XJIG_TOKEN ANTHROPIC_API_KEYS MY_GIT_TOKEN PATHS HOMEBREW_GITHUB_API_TOKEN LANGUAGE \
+  XLC_TOKEN NPM_DOCKER_TOKEN COMPOSER_AUTH; do
   parses "build-secret $name is no name of jig's" "$valid
 build-secret $name"
 done
