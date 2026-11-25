@@ -218,6 +218,51 @@ $(jig_protected_list)
 checks=$(( checks + 1 ))
 [[ $rules != *@VERIFY@* && $rules != *@PROTECTED@* ]] || fail "the engine rules keep a placeholder: $rules"
 
+flat() {
+  printf '%s' "$1" | tr '\n' ' ' | tr -s ' '
+}
+has() {
+  checks=$(( checks + 1 ))
+  [[ $(flat "$2") == *"$3"* ]] || fail "$1: no \"$3\" in: $2"
+}
+hasnt() {
+  checks=$(( checks + 1 ))
+  [[ $(flat "$2") != *"$3"* ]] || fail "$1: \"$3\" in: $2"
+}
+shape="Your final message becomes part of the pull request description. By default write it as: What changes, Behaviour changes, Not done (with what you noticed but did not fix), How to check (what a reviewer should click or run, if anything). If the repository's instructions or the rules after these give the final message another shape, such as a team's pull request template, use that shape instead."
+equals "the rules are for pr delivery when the config has no deliver" "$profile_deliver" pr
+has "pr rules: jig pushes and opens the PR" "$rules" "Commit on the current branch, in small commits. Do not push or open a pull request: jig does that."
+has "pr rules: a protected path makes a draft, .github/ stops the push" "$rules" \
+  "Do not change these paths (\`*\` matches any characters, \`/\` included). jig opens the pull request as a draft if any of them changes, and pushes nothing if \`.github/\` changes. \`JIG_BLOCKED.md\` at the repository root is always allowed"
+has "pr rules: the final message goes into the PR, in the default shape unless other rules give one" "$rules" "$shape"
+hasnt "pr rules do not hand the branch over" "$rules" "hands the branch"
+checks=$(( checks + 1 ))
+[[ ! $rules =~ @[A-Z_]+@ ]] || fail "the pr rules keep a placeholder: $rules"
+jig_parse_profile cfg <<<"base main
+setup .jig/setup
+verify .jig/verify
+protect CLAUDE.md
+deliver branch"
+branch_rules="$(jig_engine_rules)"
+has "branch rules: jig hands the branch over" "$branch_rules" "Commit on the current branch, in small commits. Do not push: jig hands the branch to the owner."
+has "branch rules: a protected path or .github/ marks the branch for attention" "$branch_rules" \
+  "Do not change these paths (\`*\` matches any characters, \`/\` included). If any of them, or anything under \`.github/\`, changes, jig hands the branch over marked for the owner's attention. \`JIG_BLOCKED.md\` at the repository root is always allowed"
+has "branch rules: the final message goes into the run report, in the default shape unless other rules give one" "$branch_rules" \
+  "Your final message goes into the run report. ${shape#*description. }"
+for text in "pull request description" "opens the pull request" "pushes nothing" "jig does that"; do
+  hasnt "branch rules do not mention a PR jig opens: $text" "$branch_rules" "$text"
+done
+checks=$(( checks + 1 ))
+[[ ! $branch_rules =~ @[A-Z_]+@ ]] || fail "the branch rules keep a placeholder: $branch_rules"
+equals "branch rules differ from pr rules only in the delivery sentences" \
+  "$(diff <(printf '%s\n' "$rules") <(printf '%s\n' "$branch_rules") | grep -c '^[<>]')" 6
+checks=$(( checks + 1 ))
+(profile_deliver=queue && jig_engine_rules >/dev/null 2>&1) && fail "rules for an unknown delivery mode are refused"
+jig_parse_profile cfg <<<"base main
+setup .jig/setup
+verify .jig/verify
+protect CLAUDE.md"
+
 mkdir -p "$overlay"
 printf 'OVERLAY RULE: prefer small functions.\n' >"$overlay/rules.md"
 overlay_rules=""

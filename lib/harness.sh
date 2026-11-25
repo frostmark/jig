@@ -93,10 +93,24 @@ jig_protected_list() {
 }
 
 jig_engine_rules() {
-  local text protected verify
+  local text protected verify delivery change final
   text="$(cat "$jig_rules_file")" || return 1
   protected="$(jig_protected_list)"
   verify="cd /workspace && $(jig_profile_command "$profile_verify")"
+  case "$profile_deliver" in
+    pr)
+      delivery="Do not push or open a pull request: jig does that."
+      change="jig opens the pull request as a draft if any of them changes, and pushes nothing if \`.github/\` changes."
+      final="Your final message becomes part of the pull request description." ;;
+    branch)
+      delivery="Do not push: jig hands the branch to the owner."
+      change="If any of them, or anything under \`.github/\`, changes, jig hands the branch over marked for the owner's attention."
+      final="Your final message goes into the run report." ;;
+    *) return 1 ;;
+  esac
+  text="${text//@DELIVERY@/$delivery}"
+  text="${text//@PROTECTED_CHANGE@/$change}"
+  text="${text//@FINAL_MESSAGE@/$final}"
   text="${text//@VERIFY@/$verify}"
   printf '%s\n' "${text//@PROTECTED@/$protected}"
 }
