@@ -383,7 +383,7 @@ agent_text="exit $agent_status"
 [ -z "$agent_meta" ] || agent_text="$agent_text, $agent_meta"
 
 body="$run/pr-body.md"
-rest="$(
+pr_top="$(
   echo "- $profile_verify: $verify_text"
   echo "- Agent: $agent_text"
   echo "- Duration: $(elapsed "$started") in total, agent $agent_duration (limit $minutes min)"
@@ -402,10 +402,9 @@ rest="$(
   echo "## Agent summary"
   echo
   printf '%s\n' "$summary"
-  echo
-  echo "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 )" || die "could not compose the PR description"
-jig_pr_body "$run/plan.md" "$rest" >"$body" || die "could not write $body"
+jig_pr_body "$run/plan.md" "$pr_top" "🤖 Generated with [Claude Code](https://claude.com/claude-code)" >"$body" ||
+  die "could not write $body"
 
 refuse_leaks pr-body.md
 
