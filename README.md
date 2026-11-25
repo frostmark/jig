@@ -14,6 +14,12 @@ repository's own instructions, the engine rules and your personal overlay (see [
 ## Install
 
 1. Docker (Docker Desktop or any Docker with `docker compose`) is running; git 2.49 or newer (`git --version`).
+   jig builds images with the built-in builder of the current Docker context (`docker context show`): it
+   sets `BUILDX_BUILDER` to the context's name for its own `docker` commands only, unless `BUILDX_BUILDER`
+   is already set (an empty one counts as unset), which jig then uses as is. A `docker-container` builder,
+   one made with `docker buildx create` and perhaps your default, exports every image as a tarball and
+   keeps a second copy of it, while jig's images are local and for one platform. jig never changes your
+   default builder.
 2. `origin` is the repository on GitHub. jig takes its `<owner>/<repo>` from the URL of `origin`
    (`git remote get-url origin`): `https://github.com/<owner>/<repo>`, `git@github.com:<owner>/<repo>`
    or `ssh://git@github.com/<owner>/<repo>`, with or without `.git`, a user, a port or a trailing `/`;
@@ -92,9 +98,10 @@ file on the host.
 | `model` | optional, once | The model the agent runs on, passed to Claude Code as `--model`: an alias such as `opus` or `sonnet[1m]`, or a full model name. Latin letters, digits, `.`, `_`, `:`, `@`, `/`, `[`, `]`, `-`, starting with a letter or digit, at most 100 characters. `JIG_MODEL` replaces it for one run. Without either, jig passes no `--model` and Claude Code's default applies. `jig smoke` checks the value and does not use it. |
 | `effort` | optional, once | The reasoning effort, passed to Claude Code as `--effort`: `low`, `medium`, `high`, `xhigh` or `max`. `JIG_EFFORT` replaces it for one run. Without either, jig passes no `--effort` and Claude Code's default applies. |
 | `deliver` | optional, once | How the branch is delivered: `pr` (the default) pushes it and opens a pull request, `branch` leaves it in your checkout with a report and pushes nothing (see [Branch delivery](#branch-delivery)). `jig smoke` checks the value and does not use it. |
+| `build-secret` | any number | The name of an environment variable whose value the image build needs, a token for a private package registry for example: capital latin letters, digits and `_`, not starting with a digit. Names starting with `JIG_`, the model credential's variables and the git author and committer variables are refused, and so is a name declared twice. See [Build secrets](#build-secrets). |
 
-An unknown key, a missing required key, a repeated `base`, `setup`, `verify`, `model`, `effort` or `deliver`, or a
-value outside its character set stops jig with exit code 2 before anything runs; the message names the file and the line,
+An unknown key, a missing required key, a repeated `base`, `setup`, `verify`, `model`, `effort` or `deliver`, a
+`build-secret` name declared twice, or a value outside its character set stops jig with exit code 2 before anything runs; the message names the file and the line,
 for example `jig: origin/main:.jig/config:4: unknown key colour` (or the overlay's `config` with its
 path). jig also stops with code 2 when the profile lacks `compose.yml` or a `setup` or `verify` script.
 
@@ -228,8 +235,9 @@ lines each with `... and <n> more`.
   files it writes in the clone belong to you;
 - has `git`, `node`, `claude` (Claude Code) and `timeout` on `PATH`: jig creates and bundles the branch
   with git, runs the agent under `timeout` and reads its log with node;
-- stays up (`command: ["sleep", "infinity"]`) and becomes healthy, because jig starts the project with
-  `docker compose up --wait` and then runs commands with `docker compose exec`.
+- stays up (`command: ["sleep", "infinity"]`) and becomes healthy, because jig builds with
+  `docker compose build`, starts the project with `docker compose up --wait --no-build` and then runs
+  commands with `docker compose exec`.
 
 ```yaml
 services:
@@ -239,6 +247,7 @@ services:
       args:
         UID: ${JIG_UID:-1000}
         GID: ${JIG_GID:-1000}
+    image: acme-shop-jig
     command: ["sleep", "infinity"]
     init: true
     security_opt:
@@ -258,6 +267,58 @@ and the harness (see [Harness](#harness)). Keep that path free in the image. The
 Other services (a database, a cache) are the profile's business. No ports need to reach the host. The
 compose file runs on the host's Docker, so whoever can merge into `base` decides what the containers get
 (mounts, privileges); review `.jig/` changes like CI changes.
+
+Name the image that `app` builds (`image: acme-shop-jig` above). jig labels every image it builds with
+`jig.repo=<owner>/<repo>`, through a compose file it adds (`compose.build.yml`, with `build.labels` for each
+service that has `build`), and after each build it removes that repository's dangling images
+(`docker image prune -f --filter label=jig.repo=<owner>/<repo>`). With a fixed name, a rebuild moves the
+name to the new image and the old one becomes dangling. Without `image:`, compose names the image after the
+compose project, which differs per run (`jig-run_<owner>_<repo>_<slug>-app`), so old images keep their
+names and are never removed. jig never touches other images or the build cache, and Docker skips an image
+that a container still uses.
+
+### Build secrets
+
+The image build may need a secret, a token for a private gem or npm registry for example. Hand it to the
+build as a BuildKit secret taken from the environment, never as a build arg (build args stay in the
+image's history) or through a service's environment:
+
+```yaml
+# .jig/compose.yml
+services:
+  app:
+    build:
+      context: .
+      secrets:
+        - bundle_github
+secrets:
+  bundle_github:
+    environment: BUNDLE_GITHUB__COM
+```
+
+```dockerfile
+RUN --mount=type=secret,id=bundle_github \
+    BUNDLE_GITHUB__COM="$(cat /run/secrets/bundle_github)" bundle install
+```
+
+and declare the variable in `.jig/config` or the overlay's `config`: `build-secret BUNDLE_GITHUB__COM`.
+Then `jig run` and `jig smoke`:
+
+- stop with exit code 2 before anything runs when a declared variable is unset or empty in the
+  environment that starts jig, or its value holds a line break or another control character; the message
+  names the variable, never its value. BuildKit leaves secrets out of the build cache's key, so without this
+  check a missing secret would fail only a build whose cache is cold;
+- stop with exit code 2 before the build when the compose project, as `docker compose config` resolves the
+  profile's compose file and jig's own, has a declared name as a key in a service's `environment` (an
+  `env_file` included), or resolves the variable anywhere else (`${BUNDLE_GITHUB__COM}` in another
+  variable, a build arg or a label). jig reads that project with a marker in place of each value, so the
+  value is never in what it reads. A build secret reaches no container: only `docker compose build` reads
+  it;
+- look for each value as for the model credential: the branch is not kept or pushed when it carries one
+  (see [Usage](#usage)), and the run directory's logs get `[REDACTED]` in its place. The build's output is
+  redacted before it reaches the terminal and `build.log`, so a `RUN` step that prints a secret shows
+  `[REDACTED]`. jig matches each value as a fixed string of any characters, and a value with `\` or `"`
+  also in the form that JSON gives it in `claude.log`.
 
 ## Harness
 
@@ -412,6 +473,7 @@ jig smoke                                          # build the image, run setup 
 jig run plans/add-health-check.md
 JIG_TIMEOUT=30 jig run plans/add-health-check.md   # the agent's limit in minutes, 60 by default
 JIG_MODEL=opus JIG_EFFORT=high jig run plans/add-health-check.md   # over the profile's model and effort
+JIG_MIN_FREE_GB=10 jig run plans/add-health-check.md   # the free disk jig needs before it builds, 20 GiB by default
 jig run ~/plans/add-health-check.md --repo ~/src/shop
 ```
 
@@ -421,14 +483,27 @@ current directory. `JIG_HOME` (an absolute path, `~/.jig` by default) holds run 
 `JIG_EFFORT` replace the profile's `model` and `effort` for one run and follow the same rules; an empty
 value counts as unset, and an invalid one stops jig with code 2 before anything runs.
 
-What `jig run` does: precondition checks → the owner and name from the URL of `origin` → the overlay
-lookup → the base and the profile (`.jig/` of `origin/<base>` with the overlay's profile files over it) →
-with `deliver pr`, `gh`'s login and its name for the repository → the profile and harness sources printed →
+Before it builds, `jig run` and `jig smoke` stop with code 2 when the filesystem that holds `JIG_HOME`
+(its nearest existing directory) has less free space than `JIG_MIN_FREE_GB` GiB: a whole number, 20 by
+default, 0 turns the check off, an empty value counts as unset. When Docker's data root
+(`docker info --format '{{.DockerRootDir}}'`) exists on the host, as with Docker Engine on Linux, its
+filesystem is checked too; Docker Desktop keeps it inside its VM, whose disk image lives on the host's
+disk. When the host's disk fills up, Docker Desktop's VM disk turns read-only and Docker needs a restart.
+The message says how much is free; `docker system df` shows what Docker holds, and `docker builder prune`
+removes its build cache.
+
+What `jig run` does: precondition checks (the free disk and the builder among them) → the owner and name
+from the URL of `origin` → the overlay lookup → the base and the profile (`.jig/` of `origin/<base>` with
+the overlay's profile files over it) → with `deliver pr`, `gh`'s login and its name for the repository →
+the build secrets in the environment → the profile and harness sources printed →
 the profile and the plan's copy written to the run directory → the plan's Issue line read and printed →
-the system prompt and the compose overrides written to the run directory →
+the system prompt and the compose overrides written to the run directory → `docker compose config`
+checked for build secrets (a refusal removes the run directory) →
 a clone of that commit in `$JIG_HOME/runs/<owner>/<repo>/<slug>/repo` → compose project
 `jig-run_<owner>_<repo>_<slug>` (no ports on the host; owner and repo lowercased, characters other than
-latin letters, digits and `-` turned into `-`) → the branch `jig/<slug>` and `setup` in the container →
+latin letters, digits and `-` turned into `-`): `docker compose build` when a service builds, its output
+on the terminal and in `build.log`, then the removal of the repository's dangling images, then
+`docker compose up --wait --no-build` → the branch `jig/<slug>` and `setup` in the container →
 `claude -p` under the time limit, with `--model` and `--effort` when set → the branch leaves the container as a bundle → uncommitted changes are
 discarded (`git checkout -f`, `git clean -fd`, also in the middle of an abandoned merge or rebase) and
 `verify` runs on the committed branch → `docker compose down -v` (always: on errors and on Ctrl-C, even a
@@ -476,7 +551,7 @@ repository.
 jig pushes nothing (exit code 3; the local branch `jig/<slug>` is deleted, or never created when the
 branch itself carries the credential):
 
-- if the model credential's value is found in the objects that would be pushed (`branch.objects`: whole
+- if the model credential's value or a build secret's is found in the objects that would be pushed (`branch.objects`: whole
   commits with any headers, trees and files), in the branch diff (`branch.patch`), in the agent's final
   message, in an uncommitted `JIG_BLOCKED.md`, in the plan's copy (`plan.md`: its heading is the PR title
   even when the cut leaves it out of the description) or in the PR description; `branch.bundle` is then
@@ -487,9 +562,9 @@ branch itself carries the credential):
   the branch is kept instead (see [Branch delivery](#branch-delivery)).
 
 A commit with a NUL byte fails fsck when the branch is fetched from the bundle: that is also exit code 3
-without a push, but `branch.bundle` stays. If the value is found only in local files of the run
+without a push, but `branch.bundle` stays. If a value is found only in local files of the run
 directory (`claude.log` and others), jig replaces it there with `[REDACTED]` and deletes a file it could
-not clean; either way it warns loudly which files were affected and goes on.
+not clean; either way it warns loudly which files and which variables' values were affected and goes on.
 
 Exit codes of `jig run`:
 
@@ -572,8 +647,10 @@ to push.
 `jig run` does from the base commit (and prints the same profile lines), clones `HEAD` into
 `$JIG_HOME/smoke/<owner>/<repo>/repo`, starts compose project `jig-smoke_<owner>_<repo>`, runs `setup`
 and `verify`, and fails if they left changes in the clone. So an overlay profile, or overlay changes not
-yet committed, can be checked before a run. The compose project is always removed; the
-clone stays until the next smoke. Exit code 0 means green; any other code is the exit code of the step
+yet committed, can be checked before a run. It checks the free disk, the build secrets and the compose
+project and builds as `jig run` does, with the build's output on the terminal and in
+`$JIG_HOME/smoke/<owner>/<repo>/build.log`, redacted. The compose project is always removed. A green
+smoke removes its clone; a red one keeps it for a look until the next smoke and says so. Exit code 0 means green; any other code is the exit code of the step
 that failed, and 2 means an invalid call, profile or host, or a `setup` or `verify` that itself exited
 with 2 (the output above the last line tells which).
 
@@ -584,6 +661,8 @@ The run directory `$JIG_HOME/runs/<owner>/<repo>/<slug>/` stays after the run:
 - `claude.log`: the agent's full output (`stream-json`), where jig finds the outcome, turns, cost and
   models for the agent line;
 - `plan.md`: the copy of the plan that the agent read at `/jig/plan.md`;
+- `build.log`: `docker compose build` with every build secret's value replaced by `[REDACTED]`, then
+  the output of the prune of the repository's dangling images (no `build.log` when no service builds);
 - `setup.log`, `verify.log`: the environment setup and `verify` (no `verify.log` when the agent made no
   commits);
 - `collect.log`: errors of the commands jig uses to take the status, `JIG_BLOCKED.md` and the branch out
@@ -599,7 +678,9 @@ The run directory `$JIG_HOME/runs/<owner>/<repo>/<slug>/` stays after the run:
   the base commit with the overlay's profile files over it;
 - `compose.profile.yml`: the compose file jig added for the profile mount and `JIG_BASE`;
 - `system-prompt.md`: the engine rules and the overlay rules, as the agent got them;
-- `compose.harness.yml`: the compose file jig added for the harness and plan mounts.
+- `compose.harness.yml`: the compose file jig added for the harness and plan mounts;
+- `compose.build.yml`: the compose file jig added for the `jig.repo` label of the services that build
+  (none when no service builds).
 
 The clone `repo/` is gone after the run: it holds the agent's `.git`, whose hooks and config any
 git-aware prompt or editor on the host would run. The exception is a Ctrl-C while the clone is still
@@ -620,7 +701,7 @@ it was pushed).
 - Changes under `.github/` are never pushed: `deliver pr` refuses the branch, `deliver branch` pushes
   nothing at all and lists them first under "Needs attention".
 - The model credential's value never leaves the run directory unredacted, and a branch carrying it is
-  not pushed.
+  not pushed. The same holds for the build secrets' values, which also never reach a container.
 
 ## Known limitations
 
@@ -632,6 +713,8 @@ it was pushed).
 - One run at a time; parallel runs are not supported.
 - The image is built locally for the host's architecture, and the first build takes minutes; there is no
   build cache or prebuilt image in a registry.
+- jig removes only the dangling images labelled with the repository. The build cache, and images built
+  before jig labelled them, stay until `docker builder prune` and `docker image prune`.
 - The agent's limit is 60 minutes by default (`JIG_TIMEOUT`); `verify` after the agent has no limit.
 - No follow-up on review comments and no automatic fixing: a new run is a new plan and slug.
 - `verify` is repeated on the committed branch, but ignored files (dependency directories, build caches)
@@ -647,7 +730,7 @@ it was pushed).
 
 ## Tests
 
-`test/profile_test.sh` checks the `.jig/config` parser (`model`, `effort` and `deliver` included), the protected-path matching, loading the
+`test/profile_test.sh` checks the `.jig/config` parser (`model`, `effort`, `deliver` and `build-secret` included), the protected-path matching, loading the
 profile from a commit, the overlay's profile files (listed by git in an overlay repository, by the
 directory otherwise) and their validation, finding the base on a local bare `origin` (also from an
 overlay config, without writing `FETCH_HEAD`), building the profile from both layers, `JIG_BASE` in the profile's compose file, the
@@ -662,10 +745,17 @@ the terminal and in the PR, and the PR description (`lib/pr.sh`): the plan block
 is cut, the caps on the agent's texts and lists, the last guard on the description's size, the
 issue line read from the plan with its launch text, the refused placeholder and the warnings for Issue
 lines that are not read, and the branch lines and the shell-quoted commands of `report.md` and the terminal.
+It also checks the host safety of `lib/build.sh` and `lib/common.sh`: the scan and the redaction of the
+credential and the build secrets (values with `:`, `/`, `&`, regex and glob characters, near misses,
+overlapping values, the JSON form, a stream redacted line by line as it comes), the build secrets read from
+the environment, the builder of the Docker context or `BUILDX_BUILDER`, the disk check against a stand-in
+`df` and `docker`, reading `docker compose config` (a build secret's name in a service's environment or its
+value resolved anywhere, the services that build, jig's label file) and the build with its log and the
+prune against a stand-in `docker`.
 Both need bash and git 2.29 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
 
-`test/run_e2e.sh` runs `jig smoke` and fifteen `jig run`s end to end against a local bare repository that
+`test/run_e2e.sh` runs seven `jig smoke`s and twenty `jig run`s end to end against a local bare repository that
 `origin`, `git@github.com:acme/shop.git`, reaches through a fake `ssh` (`GIT_SSH_COMMAND`), with a
 fake `claude` mounted over `/usr/local/bin/claude` (it records its arguments and names a model in its
 log) and a fake `gh` on `PATH` that records its calls, so it needs no credential and no network. With
@@ -681,8 +771,18 @@ without commits, a branch that does not start from the base (no `jig/<slug>` is 
 uncommitted file named after the credential, which only the report would carry, a plan that carries the
 credential, and a log that names the credential as the model (the terminal shows it as `[REDACTED]`).
 After clean, refused and stopped runs alike, the target checkout's `FETCH_HEAD` is still the one the
-test wrote before them. It also reads made-up
+test wrote before them. Then an overlay profile builds an image from `JIG_E2E_IMAGE` with a build secret
+whose value has `:`, `/`, `&` and regex characters and that a `RUN` step prints: an unset or empty secret,
+the secret's name in the `app` environment and its value resolved into another variable stop jig before
+the build, and so do too little disk (`JIG_MIN_FREE_GB`) and an invalid `JIG_MIN_FREE_GB`; a
+`BUILDX_BUILDER` that is set is the builder compose uses, and without it the Docker context's; the build's
+output is redacted on the terminal and in `build.log`, the image carries `jig.repo=acme/shop`, a green
+smoke removes its clone and a red one keeps it; a plan that carries the secret is refused with
+`claude.log` redacted; each rebuild removes the image it left dangling while another repository's dangling
+image stays. It also reads made-up
 `claude.log`s with `lib/agent-log.js` in the image, values out of shape and past their limits among them. It runs only when
 `JIG_E2E_IMAGE` names a local image with bash, git, node and `timeout` (it is never pulled) and Docker is
-running, and skips otherwise: `JIG_E2E_IMAGE=<image> bash test/run_e2e.sh`. It needs what `jig run`
+running, and skips otherwise. The images it builds are small layers over that image or `scratch`, labelled
+`jig.repo=acme/shop` or `jig.repo=acme/other`; it refuses to start while such images exist and removes them
+at the end: `JIG_E2E_IMAGE=<image> bash test/run_e2e.sh`. It needs what `jig run`
 needs on the host (git 2.49 or newer) and removes its compose projects and files.
