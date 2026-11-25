@@ -413,7 +413,7 @@ pr_top="$(
 jig_pr_body "$run/plan.md" "$pr_top" "🤖 Generated with [Claude Code](https://claude.com/claude-code)" >"$body" ||
   die "could not write $body"
 
-refuse_leaks pr-body.md
+refuse_leaks plan.md pr-body.md
 
 g push --quiet origin "refs/heads/$branch:refs/heads/$branch" || die "git push origin $branch failed"
 pr_args=(--base "$base_branch" --head "$branch" --title "$title" --body-file "$body")
