@@ -691,6 +691,11 @@ profile .jig/x?y/notes: repository
 WARNING: JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version
 WARNING: the overlay's config replaces the repository's .jig/config
 \`\`\`"
+branch_warned() {
+  (jig_find_overlay && load_head && profile_deliver=branch && jig_profile_report >/dev/null 2>"$tmp/err" && sed -n 1p "$tmp/err") 2>&1
+}
+equals "with deliver branch the report, not a PR, cannot name the overlay's version" "$(branch_warned)" \
+  "jig: WARNING: JIG_PROFILES is not a git repository with a commit, so the report cannot name the overlay's version"
 git init -q -b main "$JIG_PROFILES"
 equals "an overlay repository without a commit" "$(warned)" "jig: WARNING: JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version
 jig: WARNING: the overlay's config replaces the repository's .jig/config"
@@ -716,6 +721,8 @@ jig: profile .jig/config: overlay $overlay/config
 jig: profile .jig/x?y/notes: repository
 jig: WARNING: the overlay acme/shop is outside the git repository JIG_PROFILES, so the PR cannot name its version
 jig: WARNING: the overlay's config replaces the repository's .jig/config"
+equals "with deliver branch the report, not a PR, cannot name the version of an overlay outside the repository" \
+  "$(branch_warned)" "jig: WARNING: the overlay acme/shop is outside the git repository JIG_PROFILES, so the report cannot name its version"
 rm "$overlay"
 mv "$tmp/shop-overlay" "$overlay"
 git -C "$JIG_PROFILES" add -A && git -C "$JIG_PROFILES" commit -q -m overlay

@@ -241,9 +241,11 @@ jig_overlay_version() {
 }
 
 jig_overlay_warnings() {
+  local record="the PR"
+  [ "$profile_deliver" = pr ] || record="the report"
   case "$overlay_changes" in
-    unrecorded) echo "JIG_PROFILES is not a git repository with a commit, so the PR cannot name the overlay's version" ;;
-    outside) echo "the overlay $gh_owner/$gh_name is outside the git repository JIG_PROFILES, so the PR cannot name its version" ;;
+    unrecorded) echo "JIG_PROFILES is not a git repository with a commit, so $record cannot name the overlay's version" ;;
+    outside) echo "the overlay $gh_owner/$gh_name is outside the git repository JIG_PROFILES, so $record cannot name its version" ;;
     unknown) echo "could not check the overlay $gh_owner/$gh_name for uncommitted changes (git status failed)" ;;
     uncommitted) echo "the overlay has uncommitted changes in $gh_owner/$gh_name, and this run uses them" ;;
   esac
