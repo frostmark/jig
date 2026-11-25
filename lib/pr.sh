@@ -42,7 +42,6 @@ jig_pr_excerpt() {
   printf '%s\n%s' "$(jig_cut $(( max - ${#note} - 1 )) "$text")" "$note"
 }
 
-# The first line of the description from the plan's "Issue: <ref>" line, the first non-blank line under its first "# " heading.
 jig_pr_issue() {
   local ref re='^#[1-9][0-9]*$' LC_ALL=C
   ref="$(LC_ALL=C awk 'title && !/^[[:space:]]*$/ { if (sub(/^Issue:[[:blank:]]*/, "")) print; exit }

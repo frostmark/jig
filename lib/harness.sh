@@ -158,7 +158,6 @@ jig_agent_settings() {
   printf 'model: %s, effort: %s' "$(jig_setting "$jig_model" "$jig_model_source")" "$(jig_setting "$jig_effort" "$jig_effort_source")"
 }
 
-# $1: the outcome, turns and cost from the agent's log, or nothing; $2: the models in the log, the main one first.
 jig_agent_report() {
   local meta="$1" models="$2" main others text
   main="${models%% *}"
