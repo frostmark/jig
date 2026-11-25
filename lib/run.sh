@@ -44,6 +44,7 @@ export GIT_AUTHOR_NAME="$git_name" GIT_COMMITTER_NAME="$git_name"
 export GIT_AUTHOR_EMAIL="$git_email" GIT_COMMITTER_EMAIL="$git_email"
 
 docker info >/dev/null 2>&1 || jig_fail "Docker is not running"
+jig_check_disk
 jig_use_builder
 
 jig_repo_identity

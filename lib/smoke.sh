@@ -1,6 +1,7 @@
 jig_check_host
 jig_set_home
 jig_set_profiles
+jig_check_disk
 jig_use_builder
 head="$(git -C "$repo_root" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" || jig_fail "$repo_root has no commits"
 jig_repo_identity
