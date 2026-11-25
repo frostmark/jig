@@ -79,6 +79,10 @@ value outside its character set stops jig with exit code 2 before anything runs;
 for example `jig: origin/main:.jig/config:4: unknown key colour` (or the overlay's `config` with its
 path). jig also stops with code 2 when the profile lacks `compose.yml` or a `setup` or `verify` script.
 
+`model` and `effort` (or `JIG_MODEL` and `JIG_EFFORT`) need a Claude Code in the profile's image that
+has `--model` and `--effort`. jig does not check the version: with an older CLI the agent fails at
+start, and the reason is in `claude.log`.
+
 ### Paths in the config
 
 A `setup` or `verify` value under `.jig/` names a file of the profile: the overlay's file of that name if
