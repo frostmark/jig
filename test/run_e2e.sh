@@ -896,13 +896,18 @@ smoke_image="$(image_id "$built")"
 equals "the image is built once, by jig's build step and not again by up" \
   "$(cat "$tmp/out" "$tmp/err" | grep -c "naming to docker.io/library/$built")" 1
 
-printf '#!/bin/sh\necho "verify: red on purpose"\nexit 3\n' >"$overlay/verify"
+printf '#!/bin/sh\necho "verify: red on purpose"\nmkdir -p ro/sub && touch ro/sub/file && chmod a-w ro/sub ro\nexit 3\n' >"$overlay/verify"
 chmod +x "$overlay/verify"
 (export E2E_RUN=$build_id-smoke && jig smoke)
 equals "a red smoke exits with verify's code" "$?" 3
-has_line "a red smoke says where its clone stays" "$tmp/err" "jig: the clone stays for a look until the next smoke: $smoke/repo"
+has_line "a red smoke says where its clone stays and that git-aware tools there run its hooks" "$tmp/err" \
+  "jig: the clone stays for a look until the next smoke: $smoke/repo. Its .git ran the repository's setup and verify, so a git-aware shell prompt or editor opened there can run its hooks and config: look at the files without git"
 checks=$(( checks + 1 ))
 [ -d "$smoke/repo/.git" ] || fail "a red smoke keeps its clone"
+chmod a-w "$smoke/repo/ro/sub" "$smoke/repo/ro"
+checks=$(( checks + 1 ))
+[ -f "$smoke/repo/ro/sub/file" ] && [ ! -w "$smoke/repo/ro/sub" ] && [ ! -w "$smoke/repo/ro" ] ||
+  fail "the kept clone has the red verify's directories, read-only (Docker Desktop keeps a chmod in the container from the host, so the test repeats it there)"
 equals "a cached rebuild gives the same image" "$(image_id "$built")" "$smoke_image"
 rm "$overlay/verify"
 
@@ -977,7 +982,9 @@ equals "only the current image and another repository's are left" "$(test_images
 unnamed=jig-acme_shop-app:latest
 sed '/^    image: /d' "$tmp/compose-build.yml" >"$overlay/compose.yml"
 (export E2E_RUN=$build_id-unnamed-1 && jig smoke)
-equals "a smoke of a profile whose app builds without image: exits 0" "$?" 0
+status=$?
+equals "the next smoke after the red one starts though the kept clone has read-only directories" "$status:$(cat "$tmp/err" | grep -c 'could not remove')" 0:0
+equals "a smoke of a profile whose app builds without image: exits 0" "$status" 0
 equals "jig names the image of a service that builds without image: after the repository and the service" \
   "$(docker image inspect --format '{{index .Config.Labels "jig.repo"}}' "$unnamed" 2>&1)" acme/shop
 unnamed_old="$(image_id "$unnamed")"

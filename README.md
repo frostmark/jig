@@ -666,7 +666,10 @@ and `verify`, and fails if they left changes in the clone. So an overlay profile
 yet committed, can be checked before a run. It checks the free disk, the build secrets and the compose
 project and builds as `jig run` does, with the build's output on the terminal and in
 `$JIG_HOME/smoke/<owner>/<repo>/build.log`, redacted. The compose project is always removed. A green
-smoke removes its clone; a red one keeps it for a look until the next smoke and says so. Exit code 0 means green; any other code is the exit code of the step
+smoke removes its clone; a red one keeps it for a look until the next smoke and says so, with a warning:
+its `.git` ran the repository's `setup` and `verify`, so a git-aware shell prompt or editor opened there
+can run its hooks and config. The next smoke removes it, read-only directories the container left
+included. Exit code 0 means green; any other code is the exit code of the step
 that failed, and 2 means an invalid call, profile or host, or a `setup` or `verify` that itself exited
 with 2 (the output above the last line tells which).
 
@@ -799,7 +802,8 @@ handed to `app` as a runtime secret and its value in an `env_file` under another
 the build, and so do too little disk (`JIG_MIN_FREE_GB`) and an invalid `JIG_MIN_FREE_GB`; a
 `BUILDX_BUILDER` that is set is the builder compose uses, and without it the Docker context's; the build's
 output is redacted on the terminal and in `build.log`, the image carries `jig.repo=acme/shop`, a green
-smoke removes its clone and a red one keeps it; a plan that carries the secret is refused with
+smoke removes its clone and a red one keeps it with a warning, and the next smoke starts though the kept
+clone has read-only directories; a plan that carries the secret is refused with
 `claude.log` redacted; in a clean run the agent's container has neither the secret's variable nor its
 value in its environment or under `/run/secrets`, and of the compose commands only the build gets the
 value (a `docker` on `PATH` records each call and whether the variable is set); and stand-ins on `PATH`

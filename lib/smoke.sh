@@ -22,14 +22,15 @@ finish() {
   if [ "$status" = 0 ]; then
     jig_remove_clone "$run/repo"
   elif [ -e "$run/repo" ]; then
-    echo "$jig_name: the clone stays for a look until the next smoke: $run/repo" >&2
+    echo "$jig_name: the clone stays for a look until the next smoke: $run/repo. Its .git ran the repository's setup and verify, so a git-aware shell prompt or editor opened there can run its hooks and config: look at the files without git" >&2
   fi
   [ ! -f "$run/build.log" ] || jig_redact_files "$run" build.log
   echo "$jig_name: smoke exit $status after $(( $(date +%s) - started ))s"
   exit "$status"
 }
 
-rm -rf "$run"
+jig_remove_clone "$run"
+[ ! -e "$run" ] || jig_fail "smoke starts from an empty $run"
 mkdir -p "$run"
 jig_extract_profile "$head" "$run"
 jig_use_workspace "$run/repo" "$head"
