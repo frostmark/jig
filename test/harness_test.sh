@@ -407,6 +407,7 @@ arrows="$(printf '\342\206\222\342\206\222\342\206\222')"
 equals "a cut inside a multibyte character drops the whole character" "$(in_utf8 jig_cut 5 "$arrows" | bytes)" 3
 equals "a cut right after a multibyte character keeps it" "$(in_utf8 jig_cut 6 "$arrows" | bytes)" 6
 equals "no room, no text" "$(in_utf8 jig_cut 0 "$arrows")" ""
+equals "a negative room, no text" "$(in_utf8 jig_cut -5 "$arrows")" ""
 
 equals "a line of the limit stays whole" "$(jig_pr_line "$(fill 200 x)")" "$(fill 200 x)"
 equals "a longer line is cut to the limit and marked" "$(jig_pr_line "$(fill 201 x)")" "$(fill 197 x)..."

@@ -305,6 +305,8 @@ iconv -f UTF-8 -t UTF-8 "$body" >/dev/null 2>&1 || fail "the cut PR body is vali
 checks=$(( checks + 1 ))
 size="$(grep '^    > ' "$body" | bytes)"
 [ "$size" -le 10001 ] || fail "the quoted JIG_BLOCKED.md stays within 10,000 bytes: $size bytes"
+checks=$(( checks + 1 ))
+[ "$(grep -c -x '    > ' "$body")" -gt 1400 ] || fail "the quoted JIG_BLOCKED.md keeps the blank lines that fit"
 has_line "the quoted JIG_BLOCKED.md says where the whole text is" "$body" \
   "    > (cut: the whole text is in \`$shown/oversized/blocked-branch.md\`)"
 equals "50 status lines, each cut to 200 bytes" \
