@@ -208,6 +208,7 @@ jig_compose exec -T -w /workspace app "$(jig_profile_command "$profile_setup")" 
 
 prompt="$jig_plan_prompt"
 
+echo "$jig_name: deliver: $(jig_delivery "$branch")"
 echo "$jig_name: agent $(jig_agent_settings)"
 echo "$jig_name: agent running, up to $minutes min (log: $run/claude.log)"
 agent_started=$(date +%s)

@@ -172,6 +172,14 @@ jig_agent_settings() {
   printf 'model: %s, effort: %s' "$(jig_setting "$jig_model" "$jig_model_source")" "$(jig_setting "$jig_effort" "$jig_effort_source")"
 }
 
+jig_delivery() {
+  case "$profile_deliver" in
+    pr) printf 'pr (pushes %s and opens a PR)' "$1" ;;
+    branch) printf branch ;;
+    *) return 1 ;;
+  esac
+}
+
 jig_agent_report() {
   local meta="" main="" name text also="" more=0 LC_ALL=C
   local meta_re='^((error \([a-z_]{1,40}\)|[a-z_]{1,40}), )?(turns: [0-9]{1,6}, )?(estimated cost \$[0-9]{1,6}\.[0-9]{2}, )?$'

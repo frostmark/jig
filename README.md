@@ -444,8 +444,9 @@ agent can write to its own log, so jig takes from it only values of its own shap
 rest: an outcome of lowercase letters and `_` (40 at most), whole turns, a cost below a million dollars,
 and model names that follow the rule of the `model` key. The effort is not in the log: it is the value
 jig passed with its source, or `default`. The terminal shows the
-requested model and effort before the agent starts (`jig: agent model: ..., effort: ...`) and the same
-text as the PR's agent line after it (`jig: agent: ...`), in a run without commits too.
+requested model and effort before the agent starts (`jig: agent model: ..., effort: ...`), on the line
+after the delivery mode (`jig: deliver: pr (pushes jig/<slug> and opens a PR)` or `jig: deliver: branch`),
+and the same text as the PR's agent line after it (`jig: agent: ...`), in a run without commits too.
 
 The PR is opened as a draft if `verify` is red, the time limit hit, the agent exited with an error, left
 `JIG_BLOCKED.md` or uncommitted changes, changed a protected path (`.jig/`, the `setup` and `verify`

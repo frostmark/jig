@@ -369,8 +369,10 @@ has_line "the agent sees the prompt, the read-only plan and JIG_BASE on a branch
 has_line "without a model or an effort jig passes neither" "$runs/add-health/claude.log" \
   '{"type":"system","subtype":"fake","msg":"args: '"$harness_args $stream_args"'"}'
 has_line "the terminal names the issue the PR fixes before the agent starts" "$tmp/out" "jig: issue: Fixes #12"
-has_line "the terminal says Claude Code's defaults apply before the agent starts" "$tmp/out" \
-  "jig: agent model: default, effort: default"
+equals "the terminal names pr delivery and Claude Code's defaults before the agent starts" \
+  "$(grep -A 1 -x -F 'jig: deliver: pr (pushes jig/add-health and opens a PR)' "$tmp/out")" \
+  "jig: deliver: pr (pushes jig/add-health and opens a PR)
+jig: agent model: default, effort: default"
 has_line "the terminal names the model from the log and the default effort next to turns and cost" "$tmp/out" \
   "jig: agent: $fake_meta, model: claude-fake-1 (default), effort: default"
 has_line "the agent's own verify sees JIG_BASE" "$runs/add-health/claude.log" \
@@ -569,6 +571,9 @@ jig run "$tmp/plans/branch-health.md"
 equals "a clean branch run exits 0" "$?" 0
 handed_over branch-health 1 health.txt
 no_gh "a clean branch run"
+equals "the terminal names branch delivery next to the agent settings before the agent starts" \
+  "$(grep -A 1 -x -F 'jig: deliver: branch' "$tmp/out")" "jig: deliver: branch
+jig: agent model: default, effort: default"
 fetch_head_kept branch-health
 has_line "branch delivery tells the agent that jig hands the branch over" "$runs/branch-health/system-prompt.md" \
   "- Commit on the current branch, in small commits. Do not push: jig hands the branch to the owner."

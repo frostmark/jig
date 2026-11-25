@@ -346,6 +346,17 @@ equals "only an effort from the profile" "$(agent_options "" medium unset unset)
 equals "empty JIG_MODEL and JIG_EFFORT leave the profile's values" "$(agent_options opus high "" "")" \
   "--model opus --effort high|model: opus (from the profile), effort: high (from the profile)"
 
+delivery() {
+  (profile_deliver="$1" && jig_delivery jig/add-health) 2>&1
+}
+equals "the launch says that pr delivery pushes the branch and opens a PR" "$(delivery pr)" \
+  "pr (pushes jig/add-health and opens a PR)"
+equals "the launch says branch delivery" "$(delivery branch)" branch
+for mode in queue ""; do
+  checks=$(( checks + 1 ))
+  out="$(delivery "$mode")" && fail "an unknown delivery mode is not named at launch: \"$mode\" -> $out"
+done
+
 fill() {
   printf "%$1s" '' | tr ' ' "$2"
 }
