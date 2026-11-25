@@ -1270,5 +1270,45 @@ compose -p jig-run_acme_shop_x -f /srv/compose.yml build (NPM_TOKEN set)"
 unset -f docker
 unset build_status prune
 
+mkdir "$tmp/argv" "$tmp/argv-run"
+for command in awk cat cksum cut env grep head mv rm sed sort tail tee tr wc; do
+  real="$(command -v "$command")" || continue
+  printf '#!/bin/sh\nprintf "%%s\\n" "%s $*" >>"%s/argv.log"\nexec "%s" "$@"\n' "$command" "$tmp" "$real" >"$tmp/argv/$command"
+  chmod +x "$tmp/argv/$command"
+done
+docker() {
+  printf 'docker %s\n' "$*" >>"$tmp/argv.log"
+  case "$1 ${*: -1}" in
+    "compose json") cat "$tmp/compose/build.json" ;;
+    "compose build") printf 'build sees %s\n' "${E2E_ARGV-}" ;;
+    "image label=jig.repo=acme/shop") printf 'Deleted Images:\nTotal reclaimed space: 1B\n' ;;
+    *) return 1 ;;
+  esac
+}
+argv_token=e2e0argv0credential0value
+argv_value='acme:ghp_argv/x&y"z\1'
+printf 'token %s\nvalue %s\nclean\n' "$argv_token" "$argv_value" >"$tmp/argv-run/a.log"
+(
+  PATH="$tmp/argv:$PATH"
+  jig_secret_names=() jig_secret_values=()
+  jig_add_secret CLAUDE_CODE_OAUTH_TOKEN "$argv_token"
+  export E2E_ARGV="$argv_value"
+  profile_build_secrets=(E2E_ARGV)
+  jig_read_build_secrets
+  jig_contains_secret "$tmp/argv-run/a.log"
+  jig_secrets_in "$tmp/argv-run/a.log"
+  jig_redact_text "x $argv_value"
+  printf 'x %s\n' "$argv_value" | jig_redact_stream
+  jig_redact_files "$tmp/argv-run" a.log
+  jig_project=jig-run_acme_shop_x gh_repo=acme/shop jig_builder_text=desktop-linux jig_compose_files=(-f /srv/compose.yml)
+  jig_check_compose "$tmp/argv-run" && jig_build "$tmp/argv-run/build.log"
+) >"$tmp/argv-run/out" 2>&1
+unset -f docker
+equals "the scan, the redaction, the compose check and the build ran grep, awk, sed, tee and docker" \
+  "$(for command in grep awk sed tee docker; do grep -c "^$command " "$tmp/argv.log" | sed "s/^0$/no $command/;s/^[0-9]*$/$command/"; done | tr '\n' ' ')" \
+  "grep awk sed tee docker "
+equals "no secret value is on the command line of a command they run, the credential's included" \
+  "$(LC_ALL=C grep -c -F -f <(printf '%s\n' "$argv_token" "$argv_value" 'acme:ghp_argv/x&y\"z\\1') "$tmp/argv.log")" 0
+
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]

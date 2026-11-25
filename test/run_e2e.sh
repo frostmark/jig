@@ -273,9 +273,19 @@ cat >"$tmp/bin/fake-ssh" <<'EOF'
 [ "$1" = git@github.com ] || { echo "fake ssh: unexpected host $1" >&2; exit 1; }
 cd "$FAKE_SSH_ROOT" && exec sh -c "$2"
 EOF
+for command in awk basename cat cksum cp cut date df dirname env git grep head id mkdir mv readlink rm sed sort tail tee tr wc; do
+  real="$(command -v "$command")" || continue
+  cat >"$tmp/bin/$command" <<EOF
+#!/bin/sh
+[ -z "\${E2E_ARGV:-}" ] || printf '%s\\n' "$command \$*" >>"\$E2E_ARGV"
+exec "$real" "\$@"
+EOF
+  chmod +x "$tmp/bin/$command"
+done
 real_docker="$(command -v docker)"
 cat >"$tmp/bin/docker" <<EOF
 #!/bin/sh
+[ -z "\${E2E_ARGV:-}" ] || printf '%s\\n' "docker \$*" >>"\$E2E_ARGV"
 if [ -n "\${E2E_CALLS:-}" ]; then
   case "\${E2E_BUILD_SECRET-}" in
     "") secret="" ;;
@@ -315,7 +325,7 @@ shown='$JIG_HOME/runs/acme/shop'
 attribution="🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 
 jig() {
-  (cd "$target" && E2E_CALLS="$tmp/calls" "$root/bin/jig" "$@") >"$tmp/out" 2>"$tmp/err"
+  (cd "$target" && E2E_CALLS="$tmp/calls" E2E_ARGV="$tmp/argv.log" "$root/bin/jig" "$@") >"$tmp/out" 2>"$tmp/err"
 }
 
 fetch_head_kept() {
@@ -954,6 +964,12 @@ checks=$(( checks + 1 ))
 [ -z "$(image_id "$leak_image")" ] || fail "each rebuild removes the image it left dangling"
 equals "only the current image and another repository's are left" "$(test_images | wc -l | tr -d ' ')" 3
 unset E2E_BUILD_SECRET
+
+equals "the commands jig ran on the host went through the recording stand-ins on PATH" \
+  "$(for command in docker git grep sed awk tee; do grep -q "^$command " "$tmp/argv.log" && printf '%s ' "$command"; done)" \
+  "docker git grep sed awk tee "
+equals "no command jig ran had the credential or the build secret on its command line" \
+  "$(LC_ALL=C grep -c -F -f <(printf '%s\n' "$token" "$build_secret" "$(printf '%s' "$build_secret" | sed 's/[\\"]/\\&/g')") "$tmp/argv.log")" 0
 
 checks=$(( checks + 1 ))
 [ -z "$(leftovers)" ] || fail "compose projects left: $(leftovers | sort -u | tr '\n' ' ')"

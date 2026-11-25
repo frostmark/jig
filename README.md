@@ -321,7 +321,9 @@ Then `jig run` and `jig smoke`:
   (see [Usage](#usage)), and the run directory's logs get `[REDACTED]` in its place. The build's output is
   redacted before it reaches the terminal and `build.log`, so a `RUN` step that prints a secret shows
   `[REDACTED]`. jig matches each value as a fixed string of any characters, and a value with `\` or `"`
-  also in the form that JSON gives it in `claude.log`.
+  also in the form that JSON gives it in `claude.log`. A value never goes on the command line of a
+  command jig runs, where other users of the host could see it in `ps`: `grep`, `awk` and `sed` read the
+  values from a pipe.
 
 ## Harness
 
@@ -755,7 +757,8 @@ the environment and removed from it, the builder of the Docker context or `BUILD
 `df` and `docker`, reading `docker compose config` (a build secret's name in a service's environment, a
 runtime secret or config that takes it, its value resolved anywhere, the services that build, jig's label
 file) and the build with its log and the prune against a stand-in `docker` that records which calls get
-the build secret.
+the build secret; stand-ins for `grep`, `awk`, `sed` and the other commands on that path record their
+command lines, and none carries a secret value.
 Both need bash and git 2.29 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
 
@@ -784,7 +787,9 @@ output is redacted on the terminal and in `build.log`, the image carries `jig.re
 smoke removes its clone and a red one keeps it; a plan that carries the secret is refused with
 `claude.log` redacted; in a clean run the agent's container has neither the secret's variable nor its
 value in its environment or under `/run/secrets`, and of the compose commands only the build gets the
-value (a `docker` on `PATH` records each call and whether the variable is set); each rebuild removes the image it left dangling while another repository's dangling
+value (a `docker` on `PATH` records each call and whether the variable is set); and stand-ins on `PATH`
+for `docker`, `git`, `grep`, `sed`, `awk` and the other commands jig runs on the host record every
+command line of every run and smoke, none of which carries the credential or the build secret; each rebuild removes the image it left dangling while another repository's dangling
 image stays. It also reads made-up
 `claude.log`s with `lib/agent-log.js` in the image, values out of shape and past their limits among them. It runs only when
 `JIG_E2E_IMAGE` names a local image with bash, git, node and `timeout` (it is never pulled) and Docker is

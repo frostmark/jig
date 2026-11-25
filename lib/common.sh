@@ -70,7 +70,7 @@ jig_contains_secret() {
 jig_secrets_in() {
   local i
   for i in ${jig_secret_values[@]+"${!jig_secret_values[@]}"}; do
-    if LC_ALL=C grep -a -F -q -e "${jig_secret_values[i]}" -- "$@" 2>/dev/null; then
+    if LC_ALL=C grep -a -F -q -f <(printf '%s\n' "${jig_secret_values[i]}") -- "$@" 2>/dev/null; then
       printf '%s\n' "${jig_secret_names[i]}"
     fi
   done
