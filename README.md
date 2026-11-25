@@ -102,9 +102,10 @@ This changes how existing profiles run: jig used to run `.jig/setup` as `./.jig/
 `setup`, `verify` and the agent's whole session (the agent runs `verify` itself) run in the `app` service
 with:
 
-- `/workspace` as the working directory: the clone, on the branch `jig/<slug>`. `setup` runs before the
-  agent, while the branch still points at the base commit; the final `verify` runs on the branch's last
-  commit with uncommitted changes discarded.
+- `/workspace` as the working directory: the clone, in `jig run` on the branch `jig/<slug>`, in
+  `jig smoke` on the checked `HEAD` commit, detached. `setup` runs before the agent, while the branch
+  still points at the base commit; the final `verify` runs on the branch's last commit with uncommitted
+  changes discarded.
 - `JIG_BASE`: the full sha of the base commit the branch starts from. It is always set, so a `verify`
   that cannot run the whole suite can check only what the branch changed, for example
   `git diff --name-only "$JIG_BASE" HEAD`. In `jig smoke` it is the `HEAD` commit that smoke checks, so
@@ -337,10 +338,22 @@ directory and mounts that copy read-only at `/jig/plan.md`; the prompt is
 `Implement the plan in /jig/plan.md.` Changing the file after launch does not change the run.
 
 The plan is never committed: the branch holds only the agent's commits, and the reasoning behind a change
-belongs in the issue and the PR description. The PR description starts with the plan text in a collapsed
-"Plan" block. If the whole description would pass GitHub's limit of 65,536 characters, the plan is cut
-after the last line that fits, the block is titled "Plan (cut)" and ends with the plan's size and the path
-of the whole copy. The plan's first `# ...` heading becomes the PR title.
+belongs in the issue and the PR description. The PR description ends with the plan text in a collapsed
+"Plan" block, just before the attribution line. The plan sits in a fenced `markdown` code block whose
+fence is longer than any run of backticks in the plan, so neither a cut nor the plan's own fences, HTML
+comments or `</details>` can reach past the block. The plan's first `# ...` heading becomes the PR title.
+
+jig holds the whole description within 65,536 bytes, which is never more characters than GitHub's limit
+of 65,536 characters:
+
+- the agent's final message is cut at 40,000 bytes, `JIG_BLOCKED.md` at 10,000 bytes once quoted, and
+  each line of the uncommitted-changes and protected-paths lists at 200 bytes (ending in `...`);
+- the plan takes the room that is left. A cut plan keeps the whole lines that fit, the block is titled
+  "Plan (cut)" and ends with the plan's size and the path of the whole copy;
+- if even the plan's note does not fit, the description is cut before it and says so.
+
+A cut text keeps the lines that fit, or in a single long line the whole UTF-8 characters that fit, and
+says where the whole text is in the run directory.
 
 ## Usage
 
@@ -371,8 +384,8 @@ repeated one) and removal of the clone → on the host: fetch the branch, check 
 The PR is opened as a draft if `verify` is red, the time limit hit, the agent exited with an error, left
 `JIG_BLOCKED.md` or uncommitted changes, changed a protected path (`.jig/`, the `setup` and `verify`
 scripts, and the `protect` list of the profile's config; `JIG_BLOCKED.md` is never one), or made commits
-that together change nothing but `JIG_BLOCKED.md`. The reasons are listed in the PR description under
-"Needs attention".
+that change nothing against `base` apart from `JIG_BLOCKED.md` (a change and its revert, for example).
+The reasons are listed in the PR description under "Needs attention".
 
 If the agent made no commits on the branch, there is nothing to push or review: jig skips the bundle and
 the final `verify`, removes the compose project and the clone, prints the agent's result and where to
@@ -384,7 +397,9 @@ jig pushes nothing (exit code 3, the local branch `jig/<slug>` is deleted):
 
 - if the model credential's value is found in the objects that would be pushed (`branch.objects`: whole
   commits with any headers, trees and files), in the branch diff (`branch.patch`), in the agent's final
-  message, in an uncommitted `JIG_BLOCKED.md` or in the PR description; `branch.bundle` is then deleted;
+  message, in an uncommitted `JIG_BLOCKED.md`, in the plan's copy (`plan.md`: its heading is the PR title
+  even when the cut leaves it out of the description) or in the PR description; `branch.bundle` is then
+  deleted;
 - if the branch touches `.github/` in any commit or in its final diff against `base` (a pushed workflow
   would run with the repository's secrets and write access). The credential is checked first, so a branch
   with both `.github/` and the token loses `branch.bundle` too.
@@ -429,7 +444,8 @@ The run directory `$JIG_HOME/runs/<owner>/<repo>/<slug>/` stays after the run:
 - `collect.log`: errors of the commands jig uses to take the status, `JIG_BLOCKED.md` and the branch out
   of the container;
 - `status.txt`: `git status --porcelain` after the agent;
-- `pr-body.md`: the PR description; `summary.md`: the agent's final message;
+- `pr-body.md`: the PR description, which names these files as `$JIG_HOME/runs/<owner>/<repo>/<slug>/...`
+  instead of host paths; `summary.md`: the agent's final message;
 - `branch.bundle`, `branch.patch`: the branch as it left the container, and its diff;
 - `branch.objects`: every object of the branch that is not in `base` (`git cat-file --batch`), scanned
   for the credential's value;
@@ -492,6 +508,15 @@ profile report with the overlay commit, and starting `bin/jig` through a symlink
 `test/harness_test.sh` checks the overlay lookup and its validation (a relative `JIG_PROFILES` stops
 `jig run` before the credential check), the rendered engine rules, the system prompt, the compose
 override with the plan mount, the agent's arguments and prompt, the name warnings, the harness report on
-the terminal and in the PR, and the PR description's plan block and where it is cut.
+the terminal and in the PR, and the PR description (`lib/pr.sh`): the plan block, its fence and where it
+is cut, the caps on the agent's texts and lists, and the last guard on the description's size.
 Both need bash and git 2.28 or newer, work offline and leave nothing behind: `bash test/profile_test.sh`,
 `bash test/harness_test.sh`.
+
+`test/run_e2e.sh` runs `jig smoke` and four `jig run`s end to end against a local bare `origin`, with a
+fake `claude` mounted over `/usr/local/bin/claude` and a fake `gh` on `PATH`, so it needs no credential
+and no network: a clean run, a run without commits, a run with oversized agent output and a plan cut
+inside its own code fence, and a plan whose only heading carries the credential. It runs only when
+`JIG_E2E_IMAGE` names a local image with bash, git, node and `timeout` (it is never pulled) and Docker is
+running, and skips otherwise: `JIG_E2E_IMAGE=<image> bash test/run_e2e.sh`. It needs what `jig run`
+needs on the host (git 2.49 or newer) and removes its compose projects and files.
