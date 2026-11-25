@@ -26,15 +26,22 @@ jig_valid_effort() {
   return 1
 }
 
+jig_valid_deliver() {
+  case "$1" in
+    pr | branch) return 0 ;;
+  esac
+  return 1
+}
+
 jig_valid_pattern() {
   local re='^[A-Za-z0-9._*-][A-Za-z0-9._/*-]*$'
   [[ $1 =~ $re ]]
 }
 
 jig_parse_profile() {
-  local label="$1" line key value n=0 base_line=0 setup_line=0 verify_line=0 model_line=0 effort_line=0 LC_ALL=C
+  local label="$1" line key value n=0 base_line=0 setup_line=0 verify_line=0 model_line=0 effort_line=0 deliver_line=0 LC_ALL=C
   local skip_re='^[[:blank:]]*(#|$)' line_re='^([a-z]+)[[:blank:]]+([^[:blank:]]+)[[:blank:]]*$'
-  profile_base="" profile_setup="" profile_verify="" profile_model="" profile_effort=""
+  profile_base="" profile_setup="" profile_verify="" profile_model="" profile_effort="" profile_deliver=pr
   profile_protect=()
   while IFS= read -r line || [ -n "$line" ]; do
     n=$(( n + 1 ))
@@ -74,8 +81,13 @@ jig_parse_profile() {
         jig_valid_effort "$value" || jig_fail "$label:$n: effort $jig_effort_rule"
         effort_line=$n
         profile_effort="$value" ;;
+      deliver)
+        [ "$deliver_line" = 0 ] || jig_fail "$label:$n: deliver is already set on line $deliver_line"
+        jig_valid_deliver "$value" || jig_fail "$label:$n: deliver must be pr or branch"
+        deliver_line=$n
+        profile_deliver="$value" ;;
       *)
-        jig_fail "$label:$n: unknown key $key (known keys: base, setup, verify, protect, model, effort)" ;;
+        jig_fail "$label:$n: unknown key $key (known keys: base, setup, verify, protect, model, effort, deliver)" ;;
     esac
   done
   [ "$base_line" != 0 ] || jig_fail "$label: missing the required key base"

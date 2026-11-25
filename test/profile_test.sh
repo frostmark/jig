@@ -198,7 +198,29 @@ refused "repeated effort" "$valid
 effort low
 effort max" "cfg:5: effort is already set on line 4"
 refused "the unknown key message lists the keys" "$valid
-colour red" "known keys: base, setup, verify, protect, model, effort"
+colour red" "known keys: base, setup, verify, protect, model, effort, deliver"
+
+jig_parse_profile cfg <<<"$valid"
+equals "deliver is pr by default" "$profile_deliver" pr
+jig_parse_profile cfg <<<"$valid
+deliver branch"
+equals "deliver branch" "$profile_deliver" branch
+jig_parse_profile cfg <<<"$valid"
+equals "no deliver: the previous profile's branch delivery is gone" "$profile_deliver" pr
+jig_parse_profile cfg <<<"$valid
+deliver pr"
+equals "deliver pr" "$profile_deliver" pr
+refused "deliver that is not a mode" "$valid
+deliver push" "cfg:4: deliver must be pr or branch"
+refused "deliver in upper case" "$valid
+deliver Branch" "cfg:4: deliver must be pr or branch"
+refused "deliver with a mode as its prefix" "$valid
+deliver branches" "cfg:4: deliver must be pr or branch"
+refused "deliver as a mode's prefix" "$valid
+deliver bran" "cfg:4: deliver must be pr or branch"
+refused "repeated deliver" "$valid
+deliver branch
+deliver pr" "cfg:5: deliver is already set on line 4"
 
 jig_parse_profile cfg <<<"base main
 setup bin/setup
