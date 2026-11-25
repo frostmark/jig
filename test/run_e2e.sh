@@ -61,14 +61,32 @@ remove_leftovers() {
   done
 }
 
+test_images() {
+  {
+    docker images -q --no-trunc --filter label=jig.repo=acme/shop
+    docker images -q --no-trunc --filter label=jig.repo=acme/other
+  } | sort -u
+}
+
+remove_images() {
+  local ids
+  ids="$(test_images)"
+  [ -z "$ids" ] || echo "$ids" | xargs docker rmi -f >/dev/null 2>&1
+}
+
 if [ -n "$(leftovers)" ]; then
   echo "run_e2e: compose projects of acme/shop already exist; remove them first:"
   leftovers | sort -u
   exit 1
 fi
+if [ -n "$(test_images)" ]; then
+  echo "run_e2e: images labelled jig.repo=acme/shop or jig.repo=acme/other already exist; remove them first:"
+  test_images
+  exit 1
+fi
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/jig-e2e.XXXXXX")" || exit 1
 tmp="$(cd "$tmp" && pwd -P)"
-trap 'remove_leftovers; chmod -R u+rwX "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
+trap 'remove_leftovers; remove_images; chmod -R u+rwX "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
 
 mkdir -p "$tmp/bin" "$tmp/gh" "$tmp/plans" "$tmp/profile"
 cat >"$tmp/profile/fake-claude" <<'EOF'
@@ -134,6 +152,14 @@ elif grep -q -x NOT-FROM-BASE /jig/plan.md; then
   echo ok >health.txt
   git add health.txt
   git reset -q --soft "$(git commit-tree "$(git write-tree)" -m "Start over without the base")"
+  result "What changes: health.txt says ok."
+elif grep -q -x ECHO-PLAN /jig/plan.md; then
+  while IFS= read -r line; do
+    say "plan: $line"
+  done </jig/plan.md
+  echo ok >health.txt
+  git add health.txt
+  git commit -q -m "Add health.txt"
   result "What changes: health.txt says ok."
 elif grep -q -x LEAK-STATUS /jig/plan.md; then
   echo ok >health.txt
@@ -233,7 +259,8 @@ EOF
 chmod +x "$tmp/bin/gh" "$tmp/bin/fake-ssh"
 
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
-unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL ANTHROPIC_API_KEY
+unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL ANTHROPIC_API_KEY BUILDX_BUILDER E2E_BUILD_SECRET
+export JIG_MIN_FREE_GB=1
 token=e2e0dummy0credential0value
 export PATH="$tmp/bin:$PATH" FAKE_GH_DIR="$tmp/gh" JIG_HOME="$tmp/home" JIG_PROFILES="$tmp/profiles"
 export GIT_SSH_COMMAND="$tmp/bin/fake-ssh" GIT_SSH_VARIANT=simple FAKE_SSH_ROOT="$tmp/ssh"
@@ -347,8 +374,13 @@ $(printf '%40s' '' | tr ' ' a), turns: 999999, estimated cost \$999999.99
 
 0"
 
+smoke="$JIG_HOME/smoke/acme/shop"
 jig smoke
 equals "smoke exits 0" "$?" 0
+checks=$(( checks + 1 ))
+[ ! -e "$smoke/repo" ] || fail "a green smoke removes its clone"
+checks=$(( checks + 1 ))
+[ ! -e "$smoke/build.log" ] || fail "a smoke of a profile that builds nothing writes no build.log"
 checks=$(( checks + 1 ))
 [ ! -e "$tmp/gh/calls" ] || fail "smoke runs gh: $(cat "$tmp/gh/calls")"
 has_line "setup in smoke gets the checked HEAD as JIG_BASE" "$tmp/out" "setup: JIG_BASE=$base HEAD=$base branch="
@@ -698,6 +730,172 @@ grep -q -F "jig: the CLAUDE_CODE_OAUTH_TOKEN value was found in: report.md (bran
   fail "the report that names the credential as the model is refused: $(cat "$tmp/err")"
 nothing_pushed branch-model-token
 has_line "the report is redacted in the run directory" "$runs/branch-leak/report.md" "?? [REDACTED].txt"
+
+context="$(docker context show)"
+build_id="${tmp##*.}"
+built=acme-shop-jig-e2e:latest
+overlay="$JIG_PROFILES/acme/shop"
+build_secret='acme:ghp_e2e0build/sec&ret.*[x]^$\1'
+printf 'base main\nsetup .jig/setup\nverify .jig/verify\ndeliver branch\nbuild-secret E2E_BUILD_SECRET\n' >"$overlay/config"
+cat >"$overlay/Dockerfile" <<EOF
+FROM $image
+ARG E2E_RUN
+RUN --mount=type=secret,id=e2e,mode=0444 printf 'build %s sees %s\n' "\$E2E_RUN" "\$(cat /run/secrets/e2e)"
+EOF
+sed -e "s|^    image: .*|    image: $built\\
+    build:\\
+      context: .\\
+      args:\\
+        E2E_RUN: \${E2E_RUN:?}\\
+      secrets:\\
+        - e2e|" -e '/^    pull_policy: never$/d' "$tmp/profile/compose.yml" >"$tmp/compose-build.yml"
+printf 'secrets:\n  e2e:\n    environment: E2E_BUILD_SECRET\n' >>"$tmp/compose-build.yml"
+cp "$tmp/compose-build.yml" "$overlay/compose.yml"
+
+image_id() {
+  docker image inspect --format '{{.Id}}' "$1" 2>/dev/null
+}
+
+no_secret() {
+  local f
+  for f in "$@"; do
+    lacks "the build secret's value is not in ${f#"$tmp/"}" "$f" "$build_secret"
+  done
+}
+
+printf '# Build\n\nWrite ok to health.txt.\n' >"$tmp/plans/build-missing.md"
+(export E2E_RUN=$build_id-missing && jig run "$tmp/plans/build-missing.md")
+equals "a run whose build secret is not set exits 2" "$?" 2
+equals "the missing build secret is named as the last thing on the terminal" "$(tail -n 1 "$tmp/err")" \
+  "jig: the profile's build-secret E2E_BUILD_SECRET is not set: export E2E_BUILD_SECRET before jig builds (jig hands its value only to docker compose, for the build)"
+lacks "the missing build secret stops the run before the compose project starts" "$tmp/out" "starting compose project"
+checks=$(( checks + 1 ))
+[ ! -e "$runs/build-missing" ] || fail "a missing build secret leaves no run directory"
+(export E2E_RUN=$build_id-missing E2E_BUILD_SECRET= && jig smoke)
+equals "a smoke whose build secret is empty exits 2" "$?" 2
+has_line "smoke names the empty build secret" "$tmp/err" \
+  "jig: the profile's build-secret E2E_BUILD_SECRET is not set: export E2E_BUILD_SECRET before jig builds (jig hands its value only to docker compose, for the build)"
+lacks "the missing build secret stops smoke before the build" "$tmp/out" "building app"
+
+export E2E_BUILD_SECRET="$build_secret"
+sed 's|^      HOME: /tmp$|      HOME: /tmp\
+      E2E_BUILD_SECRET:|' "$tmp/compose-build.yml" >"$overlay/compose.yml"
+printf '# Pass the build secret on\n\nWrite ok to health.txt.\n' >"$tmp/plans/build-env.md"
+(export E2E_RUN=$build_id-env && jig run "$tmp/plans/build-env.md")
+equals "a run with a build secret in a service's environment exits 2" "$?" 2
+equals "the build secret in the environment is named as the last thing on the terminal" "$(tail -n 1 "$tmp/err")" \
+  "jig: the build secret E2E_BUILD_SECRET is in the environment of the service app (docker compose config): jig never passes a build secret into a container. Remove it from the service's environment and env_file; the build gets it from a top-level secret with environment: E2E_BUILD_SECRET"
+lacks "the build secret in the environment stops the run before the compose project starts" "$tmp/out" "starting compose project"
+checks=$(( checks + 1 ))
+[ ! -e "$runs/build-env" ] || fail "a build secret in the environment leaves no run directory"
+no_secret "$tmp/out" "$tmp/err"
+sed 's|^      HOME: /tmp$|      HOME: /tmp\
+      TOKEN: x${E2E_BUILD_SECRET}|' "$tmp/compose-build.yml" >"$overlay/compose.yml"
+(export E2E_RUN=$build_id-env && jig smoke)
+equals "a smoke whose compose project resolves a build secret into another variable exits 2" "$?" 2
+equals "the resolved build secret is named as the last thing on the terminal" "$(tail -n 1 "$tmp/err")" \
+  "jig: the value of the build secret E2E_BUILD_SECRET reaches the compose project (docker compose config resolves \${E2E_BUILD_SECRET} in it: in an environment value, a build arg, a label or elsewhere): jig never passes a build secret into a container. The build gets it from a top-level secret with environment: E2E_BUILD_SECRET"
+no_secret "$tmp/out" "$tmp/err"
+cp "$tmp/compose-build.yml" "$overlay/compose.yml"
+
+(export E2E_RUN=$build_id-disk JIG_MIN_FREE_GB=999999 && jig smoke)
+equals "a smoke with too little free disk exits 2" "$?" 2
+checks=$(( checks + 1 ))
+grep -q -x -e "jig: the filesystem of JIG_HOME ($JIG_HOME) has [0-9]*\.[0-9] GiB free, less than JIG_MIN_FREE_GB=999999\. Free space before jig builds (docker system df shows what Docker holds, docker builder prune removes its build cache), or lower JIG_MIN_FREE_GB (0 turns the check off)" "$tmp/err" ||
+  fail "the disk refusal says how much is free and what to do: $(cat "$tmp/err")"
+lacks "the disk check stops smoke before the build" "$tmp/out" "building app"
+(export JIG_MIN_FREE_GB=ten && jig run "$tmp/plans/build-missing.md")
+equals "a run with an invalid JIG_MIN_FREE_GB exits 2" "$?" 2
+equals "the invalid JIG_MIN_FREE_GB is named" "$(tail -n 1 "$tmp/err")" "jig: JIG_MIN_FREE_GB must be a whole number of GiB (0 turns the check off)"
+
+(export E2E_RUN=$build_id-builder BUILDX_BUILDER=acme-missing-builder && jig smoke)
+status=$?
+checks=$(( checks + 1 ))
+[ "$status" != 0 ] || fail "a smoke with a BUILDX_BUILDER that does not exist must fail"
+has_line "a BUILDX_BUILDER that is set is the builder jig names" "$tmp/out" \
+  "jig: building app with acme-missing-builder from BUILDX_BUILDER (log: $smoke/build.log)"
+checks=$(( checks + 1 ))
+grep -q -i -F 'builder "acme-missing-builder"' "$smoke/build.log" ||
+  fail "docker compose builds with the BUILDX_BUILDER that is set: $(cat "$smoke/build.log")"
+
+(export E2E_RUN=$build_id-smoke && jig smoke)
+equals "a smoke that builds exits 0" "$?" 0
+has_line "without BUILDX_BUILDER jig builds with the Docker context's own builder" "$tmp/out" \
+  "jig: building app with $context, the builder of the Docker context (log: $smoke/build.log)"
+checks=$(( checks + 1 ))
+grep -q -F "building with \"$context\" instance" "$smoke/build.log" ||
+  fail "docker compose builds with the context's builder: $(cat "$smoke/build.log")"
+checks=$(( checks + 1 ))
+grep -q -F "build $build_id-smoke sees [REDACTED]" "$tmp/out" || fail "the terminal shows the build's output redacted: $(cat "$tmp/out")"
+checks=$(( checks + 1 ))
+grep -q -F "build $build_id-smoke sees [REDACTED]" "$smoke/build.log" || fail "build.log has the build's output redacted"
+no_secret "$tmp/out" "$tmp/err" "$smoke/build.log"
+equals "the built image is labelled with the repository" \
+  "$(docker image inspect --format '{{index .Config.Labels "jig.repo"}}' "$built")" acme/shop
+checks=$(( checks + 1 ))
+[ ! -e "$smoke/repo" ] || fail "a green smoke that builds removes its clone"
+smoke_image="$(image_id "$built")"
+
+printf '#!/bin/sh\necho "verify: red on purpose"\nexit 3\n' >"$overlay/verify"
+chmod +x "$overlay/verify"
+(export E2E_RUN=$build_id-smoke && jig smoke)
+equals "a red smoke exits with verify's code" "$?" 3
+has_line "a red smoke says where its clone stays" "$tmp/err" "jig: the clone stays for a look until the next smoke: $smoke/repo"
+checks=$(( checks + 1 ))
+[ -d "$smoke/repo/.git" ] || fail "a red smoke keeps its clone"
+equals "a cached rebuild gives the same image" "$(image_id "$built")" "$smoke_image"
+rm "$overlay/verify"
+
+mkdir "$tmp/other"
+printf 'FROM scratch\nCOPY file /file\n' >"$tmp/other/Dockerfile"
+other_ids=""
+for content in one two; do
+  printf '%s\n' "$content" >"$tmp/other/file"
+  BUILDX_BUILDER="$context" docker build -q --label jig.repo=acme/other -t acme-other-jig-e2e:latest "$tmp/other" >/dev/null 2>&1
+  other_ids="$other_ids $(image_id acme-other-jig-e2e:latest)"
+done
+other_old="${other_ids# }"
+other_old="${other_old%% *}"
+equals "another repository's image is dangling before the run" \
+  "$(docker images -q --no-trunc --filter dangling=true --filter label=jig.repo=acme/other)" "$other_old"
+
+printf '# Leak the build secret\n\nECHO-PLAN\n\nThe build reads %s.\n' "$build_secret" >"$tmp/plans/build-leak.md"
+(export E2E_RUN=$build_id-leak && jig run "$tmp/plans/build-leak.md")
+equals "a run whose plan carries the build secret exits 3" "$?" 3
+checks=$(( checks + 1 ))
+grep -q -F "jig: the E2E_BUILD_SECRET value was found in: plan.md (branch.bundle was removed" "$tmp/err" ||
+  fail "the build secret in the plan is found by the scan: $(cat "$tmp/err")"
+nothing_pushed build-leak
+has_line "the run names the build and its log" "$tmp/out" \
+  "jig: building app with $context, the builder of the Docker context (log: $runs/build-leak/build.log)"
+checks=$(( checks + 1 ))
+grep -q -F "build $build_id-leak sees [REDACTED]" "$runs/build-leak/build.log" || fail "the run's build.log has the build's output redacted"
+checks=$(( checks + 1 ))
+grep -q -F '"msg":"plan: The build reads [REDACTED]."' "$runs/build-leak/claude.log" ||
+  fail "claude.log has the build secret redacted: $(grep 'plan: The build' "$runs/build-leak/claude.log")"
+has_line "the redaction names the files and the build secret" "$tmp/err" \
+  "jig: WARNING: the E2E_BUILD_SECRET value was found in claude.log plan.md and replaced with [REDACTED] in $runs/build-leak"
+no_secret "$tmp/out" "$tmp/err" "$runs/build-leak/build.log" "$runs/build-leak/claude.log" "$runs/build-leak/plan.md"
+checks=$(( checks + 1 ))
+grep -q -E '^jig: removed the dangling images labelled jig\.repo=acme/shop \(reclaimed [0-9.]+[kMG]?B\)$' "$tmp/out" ||
+  fail "the run says it removed the repository's dangling images: $(cat "$tmp/out")"
+checks=$(( checks + 1 ))
+[ -z "$(image_id "$smoke_image")" ] || fail "the repository's image that the rebuild left dangling is removed"
+equals "another repository's dangling image stays" "$(image_id "$other_old")" "$other_old"
+leak_image="$(image_id "$built")"
+
+printf '# Add a health file\n\nWrite ok to health.txt.\n' >"$tmp/plans/build-health.md"
+(export E2E_RUN=$build_id-health && jig run "$tmp/plans/build-health.md")
+equals "a clean run that builds exits 0" "$?" 0
+handed_over build-health 1 health.txt
+no_gh "a clean run that builds"
+checks=$(( checks + 1 ))
+grep -q -F "build $build_id-health sees [REDACTED]" "$runs/build-health/build.log" || fail "the clean run's build.log has the build's output redacted"
+no_secret "$tmp/out" "$tmp/err" "$runs/build-health/build.log"
+checks=$(( checks + 1 ))
+[ -z "$(image_id "$leak_image")" ] || fail "each rebuild removes the image it left dangling"
+equals "only the current image and another repository's are left" "$(test_images | wc -l | tr -d ' ')" 3
+unset E2E_BUILD_SECRET
 
 checks=$(( checks + 1 ))
 [ -z "$(leftovers)" ] || fail "compose projects left: $(leftovers | sort -u | tr '\n' ' ')"
