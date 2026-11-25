@@ -89,7 +89,9 @@ check() {
   say "check failed: $1"
   exit 5
 }
-node -e 'process.stdout.write(JSON.stringify({ type: "system", subtype: "init", model: "claude-fake-1" }) + "\n")'
+init_model=claude-fake-1
+if grep -q -x MODEL-TOKEN /jig/plan.md 2>/dev/null; then init_model="$CLAUDE_CODE_OAUTH_TOKEN"; fi
+node -e 'process.stdout.write(JSON.stringify({ type: "system", subtype: "init", model: process.argv[1] }) + "\n")' "$init_model"
 prompt=""
 args=""
 while [ "$#" -gt 0 ]; do
@@ -99,7 +101,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 say "args:$args"
-models=claude-fake-1
+models="$init_model"
 if grep -q -x TWO-MODELS /jig/plan.md; then models="claude-fake-1 claude-fake-mini"; fi
 [ "$prompt" = "Implement the plan in /jig/plan.md." ] || check "the prompt is $prompt"
 [ -r /jig/plan.md ] || check "no /jig/plan.md"
@@ -682,6 +684,19 @@ grep -q -F "jig: the CLAUDE_CODE_OAUTH_TOKEN value was found in: plan.md (branch
   fail "branch delivery finds the credential in the plan's copy alone: $(cat "$tmp/err")"
 nothing_pushed branch-plan-leak
 no_gh "a branch run whose plan carries the credential"
+
+printf '# Name the credential as the model\n\nMODEL-TOKEN\n' >"$tmp/plans/branch-model-token.md"
+jig run "$tmp/plans/branch-model-token.md"
+equals "a branch run whose log names the credential as its model exits 3" "$?" 3
+has_line "the terminal's agent line hides a model name that is the credential" "$tmp/out" \
+  "jig: agent: $fake_meta, model: [REDACTED] (default), effort: default"
+for f in "$tmp/out" "$tmp/err"; do
+  lacks "the credential named as the model does not reach the terminal: ${f##*/}" "$f" "$token"
+done
+checks=$(( checks + 1 ))
+grep -q -F "jig: the CLAUDE_CODE_OAUTH_TOKEN value was found in: report.md (branch.bundle was removed" "$tmp/err" ||
+  fail "the report that names the credential as the model is refused: $(cat "$tmp/err")"
+nothing_pushed branch-model-token
 has_line "the report is redacted in the run directory" "$runs/branch-leak/report.md" "?? [REDACTED].txt"
 
 checks=$(( checks + 1 ))

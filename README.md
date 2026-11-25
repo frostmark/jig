@@ -450,7 +450,9 @@ and model names that follow the rule of the `model` key. The effort is not in th
 jig passed with its source, or `default`. The terminal shows the
 requested model and effort before the agent starts (`jig: agent model: ..., effort: ...`), on the line
 after the delivery mode (`jig: deliver: pr (pushes jig/<slug> and opens a PR)` or `jig: deliver: branch`),
-and the same text as the PR's agent line after it (`jig: agent: ...`), in a run without commits too.
+and the same text as the PR's agent line after it (`jig: agent: ...`), in a run without commits too. That line is
+printed before the credential scan, so the credential's value in it (a model name the agent wrote into
+its log, for example) is shown as `[REDACTED]`; the PR description or report that carries it is refused.
 
 The PR is opened as a draft if `verify` is red, the time limit hit, the agent exited with an error, left
 `JIG_BLOCKED.md` or uncommitted changes, changed a protected path (`.jig/`, the `setup` and `verify`
