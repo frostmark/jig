@@ -17,6 +17,7 @@ jig_name="jig"
 . "$engine_root/lib/profile.sh"
 . "$engine_root/lib/harness.sh"
 . "$engine_root/lib/pr.sh"
+. "$engine_root/lib/build.sh"
 
 usage() {
   echo "usage: jig run <plan.md> [--repo <path>]" >&2
@@ -27,6 +28,8 @@ usage() {
   echo "  JIG_EFFORT=<level>     run: Claude Code's --effort (low, medium, high, xhigh, max), over the profile's effort" >&2
   echo "  JIG_HOME=<dir>         where run and smoke directories live (default ~/.jig)" >&2
   echo "  JIG_PROFILES=<dir>     the personal overlay root (default \$JIG_HOME/profiles)" >&2
+  echo "  JIG_MIN_FREE_GB=<GiB>  the free space jig needs before it builds (default 20, 0 turns the check off)" >&2
+  echo "  BUILDX_BUILDER=<name>  the builder for the image (default: the builder of the current Docker context)" >&2
   echo "  CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (exactly one) authenticates the agent in run" >&2
   exit 2
 }

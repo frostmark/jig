@@ -48,6 +48,147 @@ jig_warn() {
   done < <("$@")
 }
 
+jig_secret_names=()
+jig_secret_values=()
+
+jig_insert_secret() {
+  local i=0 LC_ALL=C
+  while [ "$i" -lt "${#jig_secret_values[@]}" ] && [ "${#jig_secret_values[i]}" -ge "${#2}" ]; do
+    i=$(( i + 1 ))
+  done
+  jig_secret_names=(${jig_secret_names[@]+"${jig_secret_names[@]:0:i}"} "$1" ${jig_secret_names[@]+"${jig_secret_names[@]:i}"})
+  jig_secret_values=(${jig_secret_values[@]+"${jig_secret_values[@]:0:i}"} "$2" ${jig_secret_values[@]+"${jig_secret_values[@]:i}"})
+}
+
+jig_add_secret() {
+  local escaped
+  jig_insert_secret "$1" "$2"
+  escaped="$(printf '%s' "$2" | LC_ALL=C sed 's/[\\"]/\\&/g')"
+  [ "$escaped" = "$2" ] || jig_insert_secret "$1" "$escaped"
+}
+
+jig_contains_secret() {
+  [ "${#jig_secret_values[@]}" -gt 0 ] || return 1
+  LC_ALL=C grep -a -F -q -f <(printf '%s\n' "${jig_secret_values[@]}") -- "$1"
+}
+
+jig_secrets_in() {
+  local i
+  for i in ${jig_secret_values[@]+"${!jig_secret_values[@]}"}; do
+    if LC_ALL=C grep -a -F -q -f <(printf '%s\n' "${jig_secret_values[i]}") -- "$@" 2>/dev/null; then
+      printf '%s\n' "${jig_secret_names[i]}"
+    fi
+  done
+  return 0
+}
+
+jig_values_of() {
+  local listed=$'\n'"$1"$'\n' seen=$'\n' name joined="" names=()
+  for name in ${jig_secret_names[@]+"${jig_secret_names[@]}"}; do
+    case "$seen" in
+      *$'\n'"$name"$'\n'*) continue ;;
+    esac
+    seen="$seen$name"$'\n'
+    case "$listed" in
+      *$'\n'"$name"$'\n'*) names+=("$name") ;;
+    esac
+  done
+  case "${#names[@]}" in
+    0) printf 'a secret value' ;;
+    1) printf 'the %s value' "${names[0]}" ;;
+    *)
+      for name in "${names[@]:0:${#names[@]}-1}"; do
+        joined="$joined, $name"
+      done
+      printf 'the %s and %s values' "${joined#, }" "${names[${#names[@]}-1]}" ;;
+  esac
+}
+
+jig_values_found() {
+  local phrase
+  phrase="$(jig_values_of "$1")"
+  case "$phrase" in
+    *values) printf '%s were' "$phrase" ;;
+    *) printf '%s was' "$phrase" ;;
+  esac
+}
+
+jig_all_secrets() {
+  printf '%s\n' ${jig_secret_names[@]+"${jig_secret_names[@]}"}
+}
+
+jig_redact_awk='NR == FNR { if ($0 != "") v[++n] = $0; next }
+{
+  line = $0
+  for (i = 1; i <= n; i++) {
+    out = ""
+    while ((p = index(line, v[i])) > 0) {
+      out = out substr(line, 1, p - 1) "[REDACTED]"
+      line = substr(line, p + length(v[i]))
+    }
+    line = out line
+  }
+  print line
+}'
+
+jig_redact_file() {
+  LC_ALL=C awk "$jig_redact_awk" <(printf '%s\n' "${jig_secret_values[@]}") "$1" >"$1.redacted" && mv -f "$1.redacted" "$1"
+}
+
+jig_redact_text() {
+  local text="$1" value LC_ALL=C
+  for value in ${jig_secret_values[@]+"${jig_secret_values[@]}"}; do
+    text="${text//"$value"/[REDACTED]}"
+  done
+  printf '%s' "$text"
+}
+
+jig_redact_stream() {
+  local line value LC_ALL=C
+  while IFS= read -r line || [ -n "$line" ]; do
+    for value in ${jig_secret_values[@]+"${jig_secret_values[@]}"}; do
+      line="${line//"$value"/[REDACTED]}"
+    done
+    printf '%s\n' "$line"
+  done
+}
+
+jig_redact_files() {
+  local dir="$1" f status redacted="" removed="" redacted_names="" removed_names="" names
+  shift
+  [ "${#jig_secret_values[@]}" -gt 0 ] || return 0
+  for f in "$@"; do
+    status=0
+    jig_contains_secret "$dir/$f" || status=$?
+    case "$status" in
+      0)
+        names="$(jig_secrets_in "$dir/$f")"
+        if jig_redact_file "$dir/$f" && { jig_contains_secret "$dir/$f"; [ "$?" = 1 ]; }; then
+          redacted="$redacted $f"
+          redacted_names="$redacted_names$names"$'\n'
+        else
+          rm -f "$dir/$f" "$dir/$f.redacted"
+          removed="$removed $f"
+          removed_names="$removed_names$names"$'\n'
+        fi ;;
+      1) ;;
+      *) echo "$jig_name: WARNING: could not scan $dir/$f for $(jig_values_of "$(jig_all_secrets)")" >&2 ;;
+    esac
+  done
+  [ -z "$redacted" ] ||
+    echo "$jig_name: WARNING: $(jig_values_found "$redacted_names") found in$redacted and replaced with [REDACTED] in $dir" >&2
+  [ -z "$removed" ] ||
+    echo "$jig_name: WARNING: $(jig_values_found "$removed_names") found in$removed, which could not be redacted and were removed from $dir" >&2
+}
+
+# The clone holds a .git that ran the repository's scripts, and in jig run the agent: its hooks and config would run in any git-aware prompt or editor on the host.
+jig_remove_clone() {
+  [ -e "$1" ] || return 0
+  chmod -R u+rwX "$1" 2>/dev/null || true
+  rm -rf "$1" ||
+    echo "$jig_name: WARNING: could not remove $1; delete it without running git or opening it in an editor" >&2
+}
+
 jig_docker_name() {
   printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C tr -c 'a-z0-9-' '-'
 }

@@ -33,16 +33,32 @@ jig_valid_deliver() {
   return 1
 }
 
+jig_valid_build_secret() {
+  local re='^[A-Z_][A-Z0-9_]*$' LC_ALL=C
+  [[ $1 =~ $re ]] || return 1
+  case "$1" in
+    JIG_* | CLAUDE_CODE_OAUTH_TOKEN | ANTHROPIC_API_KEY | GIT_* | PATH | HOME | USER | SHELL | TMPDIR | LANG | LC_* | BUILDX_* | DOCKER_* | COMPOSE_*) return 2 ;;
+    _ | BASH | BASH_* | BASHOPTS | BASHPID | CDPATH | CHILD_MAX | COLUMNS | COMP_* | COMPREPLY | COPROC | DIRSTACK | EMACS | ENV | \
+      EPOCHREALTIME | EPOCHSECONDS | EUID | EXECIGNORE | FCEDIT | FIGNORE | FUNCNAME | FUNCNEST | GLOBIGNORE | GLOBSORT | GROUPS | \
+      HISTCMD | HISTCONTROL | HISTFILE | HISTFILESIZE | HISTIGNORE | HISTSIZE | HISTTIMEFORMAT | HOSTFILE | HOSTNAME | HOSTTYPE | \
+      IFS | IGNOREEOF | INPUTRC | INSIDE_EMACS | LINENO | LINES | MACHTYPE | MAIL | MAILCHECK | MAILPATH | MAPFILE | OLDPWD | \
+      OPTARG | OPTERR | OPTIND | OSTYPE | PIPESTATUS | POSIXLY_CORRECT | PPID | PROMPT_COMMAND | PROMPT_DIRTRIM | PS[0-4] | PWD | \
+      RANDOM | READLINE_* | REPLY | SECONDS | SHELLOPTS | SHLVL | SRANDOM | TERM | TIMEFORMAT | TMOUT | UID) return 3 ;;
+  esac
+}
+
 jig_valid_pattern() {
   local re='^[A-Za-z0-9._*-][A-Za-z0-9._/*-]*$'
   [[ $1 =~ $re ]]
 }
 
 jig_parse_profile() {
-  local label="$1" line key value n=0 base_line=0 setup_line=0 verify_line=0 model_line=0 effort_line=0 deliver_line=0 LC_ALL=C
-  local skip_re='^[[:blank:]]*(#|$)' line_re='^([a-z]+)[[:blank:]]+([^[:blank:]]+)[[:blank:]]*$'
+  local label="$1" line key value i status n=0 base_line=0 setup_line=0 verify_line=0 model_line=0 effort_line=0 deliver_line=0 LC_ALL=C
+  local skip_re='^[[:blank:]]*(#|$)' line_re='^([a-z][a-z-]*)[[:blank:]]+([^[:blank:]]+)[[:blank:]]*$'
+  local -a secret_lines=()
   profile_base="" profile_setup="" profile_verify="" profile_model="" profile_effort="" profile_deliver=pr
   profile_protect=()
+  profile_build_secrets=()
   while IFS= read -r line || [ -n "$line" ]; do
     n=$(( n + 1 ))
     [[ $line =~ $skip_re ]] && continue
@@ -86,8 +102,22 @@ jig_parse_profile() {
         jig_valid_deliver "$value" || jig_fail "$label:$n: deliver must be pr or branch"
         deliver_line=$n
         profile_deliver="$value" ;;
+      build-secret)
+        status=0
+        jig_valid_build_secret "$value" || status=$?
+        case "$status" in
+          1) jig_fail "$label:$n: build-secret must be an environment variable name of capital latin letters, digits and _, not starting with a digit" ;;
+          2) jig_fail "$label:$n: build-secret cannot be $value: jig sets or passes it itself (JIG_*, GIT_*, the model credential), or jig, git and Docker rely on it (PATH, HOME, USER, SHELL, TMPDIR, LANG, LC_*, BUILDX_*, DOCKER_*, COMPOSE_*), and jig removes a build secret from its environment once it has read it" ;;
+          3) jig_fail "$label:$n: build-secret cannot be $value: bash, which jig runs in, sets or reads it itself (IFS, PWD, PS1, UID, BASH_*, TERM, _ and the other shell variables of the bash manual), and jig reads, removes and sets a build secret in its own environment" ;;
+        esac
+        for i in ${profile_build_secrets[@]+"${!profile_build_secrets[@]}"}; do
+          [ "${profile_build_secrets[i]}" != "$value" ] ||
+            jig_fail "$label:$n: build-secret $value is already declared on line ${secret_lines[i]}"
+        done
+        secret_lines+=("$n")
+        profile_build_secrets+=("$value") ;;
       *)
-        jig_fail "$label:$n: unknown key $key (known keys: base, setup, verify, protect, model, effort, deliver)" ;;
+        jig_fail "$label:$n: unknown key $key (known keys: base, setup, verify, protect, model, effort, deliver, build-secret)" ;;
     esac
   done
   [ "$base_line" != 0 ] || jig_fail "$label: missing the required key base"

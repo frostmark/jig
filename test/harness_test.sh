@@ -8,6 +8,7 @@ jig_name=jig
 . "$root/lib/profile.sh"
 . "$root/lib/harness.sh"
 . "$root/lib/pr.sh"
+. "$root/lib/build.sh"
 
 failures=0
 checks=0
@@ -833,6 +834,571 @@ equals "the report names the repository, the branch with its commits and the bas
 - Base: main at 0123abcd"
 equals "one commit is singular" "$(jig_report_branch /home/dev/shop jig/x 1 develop 0123abcd | sed -n 2p)" \
   "- Branch: jig/x (1 commit)"
+
+mkdir "$tmp/secrets"
+equals "without secrets nothing is found, quietly" "$(jig_contains_secret "$root/README.md" 2>&1; echo "$?")" 1
+equals "without secrets the stream passes as is" "$(printf 'a e2e0dummy0token b\n' | jig_redact_stream)" "a e2e0dummy0token b"
+secret='acme:ghp_e2e/x&y.*[a]^$\1'
+jig_add_secret CLAUDE_CODE_OAUTH_TOKEN e2e0dummy0token
+jig_add_secret NPM_TOKEN "$secret"
+near='near acme:ghp_e2e/x&y.*[a]^$\2 and acme:ghp_e2e/x&yQ[a]^$\1 and acme:ghp_e2e/x&y.*a^$\1'
+printf 'token e2e0dummy0token here\nnpm %s and %s\nplain line\n%s\n' "$secret" "$secret" "$near" >"$tmp/secrets/log"
+redacted="token [REDACTED] here
+npm [REDACTED] and [REDACTED]
+plain line
+$near"
+printf '%s\n' "$near" >"$tmp/secrets/near"
+printf 'only %s\n' "$secret" >"$tmp/secrets/npm"
+equals "a value with : / & and regex characters is found as a fixed string" "$(jig_contains_secret "$tmp/secrets/npm"; echo "$?")" 0
+equals "near misses of the value are not found" "$(jig_contains_secret "$tmp/secrets/near"; echo "$?")" 1
+equals "an unreadable file is no clean file" "$(jig_contains_secret "$tmp/secrets/missing" 2>/dev/null; echo "$?")" 2
+equals "the names of the values in a file, longest value first" "$(jig_secrets_in "$tmp/secrets/log")" \
+  "NPM_TOKEN
+CLAUDE_CODE_OAUTH_TOKEN"
+equals "only the names of the values in the file" "$(jig_secrets_in "$tmp/secrets/npm")" NPM_TOKEN
+equals "no name for near misses" "$(jig_secrets_in "$tmp/secrets/near")" ""
+equals "one value was found" "$(jig_values_found NPM_TOKEN)" "the NPM_TOKEN value was"
+equals "two values were found, named longest value first" "$(jig_values_found "CLAUDE_CODE_OAUTH_TOKEN
+NPM_TOKEN
+CLAUDE_CODE_OAUTH_TOKEN")" "the NPM_TOKEN and CLAUDE_CODE_OAUTH_TOKEN values were"
+equals "three values are listed with commas" \
+  "$(jig_add_secret DEPLOY_KEY x && jig_values_found "$(jig_all_secrets)")" \
+  "the NPM_TOKEN, CLAUDE_CODE_OAUTH_TOKEN and DEPLOY_KEY values were"
+equals "all values by name" "$(jig_values_of "$(jig_all_secrets)")" "the NPM_TOKEN and CLAUDE_CODE_OAUTH_TOKEN values"
+cp "$tmp/secrets/log" "$tmp/secrets/log-file"
+jig_redact_file "$tmp/secrets/log-file"
+equals "a file is redacted value by value as fixed strings" "$(cat "$tmp/secrets/log-file")" "$redacted"
+equals "a stream is redacted the same way" "$(jig_redact_stream <"$tmp/secrets/log")" "$redacted"
+rm -f "$tmp/secrets/read"
+equals "a stream is redacted line by line as it comes" \
+  "$( { printf 'first %s\n' "$secret"
+      for n in $(seq 1 50); do [ -e "$tmp/secrets/read" ] && break; sleep 0.1; done
+      if [ -e "$tmp/secrets/read" ]; then echo second; else echo "held back"; fi
+    } | jig_redact_stream | { IFS= read -r line; : >"$tmp/secrets/read"; printf '%s|' "$line"; cat; })" \
+  "first [REDACTED]|second"
+equals "a text is redacted as fixed strings" "$(jig_redact_text "model $secret and e2e0dummy0token, not $near")" \
+  "model [REDACTED] and [REDACTED], not $near"
+equals "glob characters in a value match only themselves" \
+  "$(jig_secret_values=('[a]*?' '\') && jig_redact_text 'a aXY [a]*? \ b')" "a aXY [REDACTED] [REDACTED] b"
+printf '%s\n' '{"msg":"say a\"b\\c/&"}' 'raw a"b\c/&' 'other a\"b\c' >"$tmp/secrets/json"
+equals "a value with a backslash or a quote is also looked for as JSON writes it, under the same name" \
+  "$( (jig_secret_names=() && jig_secret_values=() && jig_add_secret QUOTED 'a"b\c/&' && jig_add_secret PLAIN 'a/&' &&
+    printf '%s\n' "${jig_secret_names[@]}" "${jig_secret_values[@]}" "$(jig_values_found "$(jig_all_secrets)")" &&
+    jig_redact_file "$tmp/secrets/json" && cat "$tmp/secrets/json") 2>&1)" \
+  'QUOTED
+QUOTED
+PLAIN
+a\"b\\c/&
+a"b\c/&
+a/&
+the QUOTED and PLAIN values were
+{"msg":"say [REDACTED]"}
+raw [REDACTED]
+other a\"b\c'
+equals "values are kept longest first, values of one length in the order they were added" \
+  "$( (jig_secret_names=() && jig_secret_values=() && jig_add_secret A abc && jig_add_secret B xabcx &&
+    jig_add_secret C xyz && jig_add_secret D lo && jig_add_secret E 'q"' && printf '%s ' "${jig_secret_names[@]}" "${jig_secret_values[@]}") 2>&1)" \
+  'B A C E D E xabcx abc xyz q\" lo q" '
+printf '1 xabcx 2 abc 3\n' >"$tmp/secrets/overlap"
+equals "the longer of two overlapping values is replaced first in a file, a stream and a text, whatever order they came in" \
+  "$( (jig_secret_names=() && jig_secret_values=() && jig_add_secret SHORT abc && jig_add_secret LONG xabcx &&
+    jig_redact_stream <"$tmp/secrets/overlap" && jig_redact_text "$(cat "$tmp/secrets/overlap")" && echo &&
+    jig_redact_file "$tmp/secrets/overlap" && cat "$tmp/secrets/overlap") 2>&1)" \
+  "1 [REDACTED] 2 [REDACTED] 3
+1 [REDACTED] 2 [REDACTED] 3
+1 [REDACTED] 2 [REDACTED] 3"
+mkdir "$tmp/secrets/run"
+printf 'a e2e0dummy0token\n' >"$tmp/secrets/run/a.log"
+printf 'b %s\n' "$secret" >"$tmp/secrets/run/b.log"
+printf 'c clean\n' >"$tmp/secrets/run/c.log"
+printf 'd e2e0dummy0token\n' >"$tmp/secrets/run/d.log"
+equals "redacted files are named with the values found in them" \
+  "$(jig_redact_files "$tmp/secrets/run" a.log b.log c.log 2>&1)" \
+  "jig: WARNING: the NPM_TOKEN and CLAUDE_CODE_OAUTH_TOKEN values were found in a.log b.log and replaced with [REDACTED] in $tmp/secrets/run"
+equals "the redacted files keep the rest" "$(cat "$tmp/secrets/run/a.log" "$tmp/secrets/run/b.log" "$tmp/secrets/run/c.log")" \
+  "a [REDACTED]
+b [REDACTED]
+c clean"
+equals "a file that cannot be redacted is removed and named" \
+  "$( (jig_redact_file() { return 1; } && jig_redact_files "$tmp/secrets/run" d.log c.log) 2>&1; ls "$tmp/secrets/run")" \
+  "jig: WARNING: the CLAUDE_CODE_OAUTH_TOKEN value was found in d.log, which could not be redacted and were removed from $tmp/secrets/run
+a.log
+b.log
+c.log"
+equals "a file that cannot be scanned is named with every value" \
+  "$(jig_redact_files "$tmp/secrets/run" missing.log 2>&1 | grep '^jig:')" \
+  "jig: WARNING: could not scan $tmp/secrets/run/missing.log for the NPM_TOKEN and CLAUDE_CODE_OAUTH_TOKEN values"
+equals "without secrets no file is touched" \
+  "$( (jig_secret_names=() && jig_secret_values=() && jig_redact_files "$tmp/secrets" log) 2>&1; cat "$tmp/secrets/log")" \
+  "token e2e0dummy0token here
+npm $secret and $secret
+plain line
+$near"
+jig_secret_names=()
+jig_secret_values=()
+
+read_secrets() {
+  (profile_build_secrets=("$@") && jig_read_build_secrets && printf '%s|' "${jig_secret_names[@]}" "${jig_secret_values[@]}") 2>&1
+}
+export E2E_A='acme:ghp_x/y&z' E2E_B='[a]*?\12' E2E_EMPTY='' E2E_LINE='a
+b' E2E_TAB='a	b' E2E_CR=$'a\rb'
+unset E2E_UNSET
+equals "build secrets join the secrets with their values, a backslash also in its JSON form" "$(read_secrets E2E_A E2E_B)" \
+  "E2E_A|E2E_B|E2E_B|acme:ghp_x/y&z|[a]*?\\\\12|[a]*?\\12|"
+equals "no build secrets add nothing" "$( (profile_build_secrets=() && jig_read_build_secrets && echo "${#jig_secret_values[@]}") 2>&1)" 0
+equals "a build secret leaves jig's environment once read, and jig keeps its value for the build" \
+  "$( (export E2E_KEEP=unrelated && profile_build_secrets=(E2E_A E2E_B) && jig_read_build_secrets &&
+    printf '%s|' "${E2E_A-unset}" "${E2E_B-unset}" "$(env | grep -c -e '^E2E_A=' -e '^E2E_B=')" "${E2E_KEEP-unset}" "${jig_build_values[@]}") 2>&1)" \
+  'unset|unset|0|unrelated|acme:ghp_x/y&z|[a]*?\12|'
+exits_2 "an unset build secret stops jig and names it" \
+  "jig: the profile's build-secret E2E_UNSET is not set: export E2E_UNSET before jig builds (jig hands its value only to docker compose, for the build)" \
+  read_secrets E2E_A E2E_UNSET
+exits_2 "an empty build secret counts as unset" "jig: the profile's build-secret E2E_EMPTY is not set" read_secrets E2E_EMPTY
+for name in E2E_LINE E2E_TAB E2E_CR; do
+  exits_2 "a build secret with a control character stops jig: $name" \
+    "jig: the value of the build secret $name has a line break or another control character, which jig cannot look for in its logs" \
+    read_secrets "$name"
+done
+equals "the refusal does not print the value" "$(read_secrets E2E_LINE | grep -c -e '^b' -e 'a	b')" 0
+exits_2 "a build secret shorter than 8 characters stops jig and names it" \
+  "jig: the value of the build secret E2E_SHORT is shorter than 8 characters: jig replaces it with [REDACTED] wherever it appears in its logs, and so short a value would hide ordinary text" \
+  env E2E_SHORT=a2c4e6g bash -c "$(declare -f read_secrets jig_read_build_secrets jig_add_secret jig_insert_secret jig_fail); jig_name=jig; read_secrets E2E_SHORT"
+equals "the short value is not printed" "$(E2E_SHORT=a2c4e6g read_secrets E2E_SHORT | grep -c a2c4e6g)" 0
+equals "8 characters are enough" "$(E2E_EIGHT=a2c4e6g8 read_secrets E2E_EIGHT)" "E2E_EIGHT|a2c4e6g8|"
+unset E2E_A E2E_B E2E_EMPTY E2E_LINE E2E_TAB E2E_CR E2E_SHORT E2E_EIGHT
+
+docker() {
+  printf '%s\n' "$*" >>"$tmp/docker.calls"
+  case "$1 $2" in
+    "context show") [ "$docker_context" != fail ] && echo "$docker_context" ;;
+    *) return 1 ;;
+  esac
+}
+builder() {
+  rm -f "$tmp/docker.calls"
+  (jig_use_builder && printf '%s|%s|%s' "$BUILDX_BUILDER" "$jig_builder_text" "$(env | grep '^BUILDX_BUILDER=')") 2>&1
+}
+docker_context=desktop-linux
+equals "without BUILDX_BUILDER jig builds with the Docker context's own builder, for its own commands" "$(env -u BUILDX_BUILDER bash -c true; unset BUILDX_BUILDER; builder)" \
+  "desktop-linux|desktop-linux, the builder of the Docker context|BUILDX_BUILDER=desktop-linux"
+equals "jig only asks Docker for the context" "$(cat "$tmp/docker.calls")" "context show"
+equals "an empty BUILDX_BUILDER counts as unset" "$(BUILDX_BUILDER='' builder)" \
+  "desktop-linux|desktop-linux, the builder of the Docker context|BUILDX_BUILDER=desktop-linux"
+equals "a BUILDX_BUILDER that is set is left alone" "$(BUILDX_BUILDER=mybuilder builder; echo "|$(cat "$tmp/docker.calls" 2>/dev/null)")" \
+  "mybuilder|mybuilder from BUILDX_BUILDER|BUILDX_BUILDER=mybuilder|"
+equals "the builder's name is printable" "$(BUILDX_BUILDER=$'my\033builder' builder | cut -d'|' -f2)" "my?builder from BUILDX_BUILDER"
+docker_context=fail
+exits_2 "a context that cannot be read stops jig" \
+  "jig: could not read the current Docker context (docker context show), whose builder jig builds with: set BUILDX_BUILDER to a builder" \
+  env -u BUILDX_BUILDER bash -c "$(declare -f docker jig_use_builder jig_fail printable); jig_name=jig tmp='$tmp' docker_context=fail; jig_use_builder"
+unset docker_context
+
+gib=1048576
+df() {
+  printf '%s\n' "$*" >>"$tmp/df.calls"
+  echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+  case "$2" in
+    "$tmp/docker-root") echo "/dev/vm 100 50 $root_kib 50% /var/lib/docker" ;;
+    *) echo "${home_fs:-/dev/disk3s5} 100 50 $home_kib 50% ${home_mount:-/System/Volumes/Data}" ;;
+  esac
+}
+docker() {
+  printf '%s\n' "$*" >>"$tmp/docker.calls"
+  case "$1 $2" in
+    "info --format") [ "$docker_root" != fail ] && echo "${docker_os:-Ubuntu 24.04}|$docker_root" ;;
+    "context inspect") [ "${docker_host:-}" != fail ] && echo "${docker_host:-unix:///var/run/docker.sock}" ;;
+    *) return 1 ;;
+  esac
+}
+disk() {
+  rm -f "$tmp/df.calls" "$tmp/docker.calls"
+  (jig_home="$tmp/home/.jig" && jig_check_disk) 2>&1
+}
+disk_env() {
+  local name="$1" want="$2"
+  shift 2
+  exits_2 "$name" "$want" env "$@" bash -c "$(declare -f df docker disk jig_check_disk jig_check_free jig_free_kib jig_fail printable); $(declare -p jig_df_awk jig_min_free_re); jig_name=jig tmp='$tmp' home_kib=$home_kib root_kib=$root_kib docker_root=$docker_root; disk"
+}
+mkdir "$tmp/docker-root"
+unset JIG_MIN_FREE_GB
+home_kib=$(( 20 * gib )) root_kib=$(( 20 * gib )) docker_root=/var/lib/docker
+equals "20 GiB free passes the default" "$(disk)" ""
+equals "a JIG_HOME that does not exist yet is checked on its nearest directory" "$(cat "$tmp/df.calls")" "-Pk $tmp"
+equals "Docker's system and data root and the context's endpoint are asked for" "$(cat "$tmp/docker.calls")" \
+  "info --format {{.OperatingSystem}}|{{.DockerRootDir}}
+context inspect --format {{.Endpoints.docker.Host}}"
+home_kib=$(( 20 * gib - 1 ))
+exits_2 "less than 20 GiB free under JIG_HOME stops jig, saying how much is free and what to do" \
+  "jig: the filesystem of JIG_HOME ($tmp/home/.jig) has 19.9 GiB free, less than JIG_MIN_FREE_GB=20. Free space before jig builds (docker system df shows what Docker holds, docker builder prune removes its build cache), or lower JIG_MIN_FREE_GB (0 turns the check off)" \
+  disk
+home_fs='map auto_home' home_mount='/Volumes/My Disk 2'
+exits_2 "a filesystem name and a mount point with spaces are read right" \
+  "jig: the filesystem of JIG_HOME ($tmp/home/.jig) has 19.9 GiB free, less than JIG_MIN_FREE_GB=20." disk
+home_kib=$(( 20 * gib ))
+equals "enough space with spaces in the names passes" "$(disk)" ""
+home_mount=''
+equals "a filesystem name with spaces alone is read right" "$(disk)" ""
+home_fs='' home_mount='/Volumes/My 1 2 3% Disk'
+equals "a mount point with spaces and numbers is read right" "$(disk)" ""
+home_fs='1 2 3 4% //nas/share 5 6 7%' home_mount='' home_kib=$(( 19 * gib ))
+exits_2 "a filesystem name with numbers and percentages is not taken for the sizes" \
+  "jig: the filesystem of JIG_HOME ($tmp/home/.jig) has 19.0 GiB free, less than JIG_MIN_FREE_GB=20." disk
+home_fs='' home_kib=$(( 20 * gib ))
+home_mount='' home_kib=$(( 3 * gib / 2 ))
+disk_env "JIG_MIN_FREE_GB sets the limit" "has 1.5 GiB free, less than JIG_MIN_FREE_GB=2." JIG_MIN_FREE_GB=2
+equals "JIG_MIN_FREE_GB=1 passes 1.5 GiB" "$(JIG_MIN_FREE_GB=1 disk)" ""
+equals "JIG_MIN_FREE_GB=0 turns the check off" "$(JIG_MIN_FREE_GB=0 home_kib=0 disk; cat "$tmp/df.calls" "$tmp/docker.calls" 2>/dev/null)" ""
+equals "an empty JIG_MIN_FREE_GB is the default" "$(JIG_MIN_FREE_GB='' home_kib=$(( 19 * gib )) disk | grep -c 'JIG_MIN_FREE_GB=20\.')" 1
+for value in abc -1 1.5 01 ' 5' '5 ' 1234567 0x10 '5;id'; do
+  disk_env "JIG_MIN_FREE_GB must be a whole number: $value" \
+    "jig: JIG_MIN_FREE_GB must be a whole number of GiB (0 turns the check off)" JIG_MIN_FREE_GB="$value"
+done
+equals "the largest JIG_MIN_FREE_GB is accepted" "$(JIG_MIN_FREE_GB=999999 home_kib=$(( 999999 * gib )) disk)" ""
+home_kib=$(( 20 * gib )) docker_root="$tmp/docker-root"
+equals "the data root of a Docker on a local socket is checked too" "$(disk; cat "$tmp/df.calls")" "-Pk $tmp
+-Pk $tmp/docker-root"
+root_kib=$(( 5 * gib ))
+exits_2 "Docker's data root with too little space stops jig" \
+  "jig: the filesystem of Docker's data root ($tmp/docker-root) has 5.0 GiB free, less than JIG_MIN_FREE_GB=20." disk
+equals "Docker Desktop's data root is in its VM and skipped, even where the same path exists on the host" \
+  "$(docker_os='Docker Desktop' disk; cat "$tmp/df.calls")" "-Pk $tmp"
+equals "the data root of a Docker that is not on a local socket is skipped" \
+  "$(docker_host=tcp://10.0.0.2:2376 disk; cat "$tmp/df.calls")" "-Pk $tmp"
+equals "a context that cannot be inspected skips the data root" "$(docker_host=fail disk; cat "$tmp/df.calls")" "-Pk $tmp"
+docker_root=/nonexistent/var/lib/docker
+equals "a data root that is not on this host is skipped" "$(disk; cat "$tmp/df.calls")" "-Pk $tmp"
+docker_root=fail
+exits_2 "Docker that does not answer stops jig" "jig: Docker is not running" disk
+docker_root=/var/lib/docker home_kib=n/a
+exits_2 "df output without a number stops jig" "jig: could not read the free space of the filesystem of JIG_HOME ($tmp/home/.jig) (df -Pk $tmp)" disk
+unset -f df
+
+mkdir "$tmp/compose"
+cat >"$tmp/compose/build.json" <<'EOF'
+{
+  "name": "jig-run_acme_shop_x",
+  "networks": {
+    "default": {
+      "name": "jig-run_acme_shop_x_default",
+      "ipam": {}
+    }
+  },
+  "secrets": {
+    "E2E_SECRET": {
+      "name": "jig-run_acme_shop_x_E2E_SECRET",
+      "environment": "E2E_SECRET"
+    }
+  },
+  "services": {
+    "app": {
+      "build": {
+        "context": "/srv/profile/.jig",
+        "dockerfile": "Dockerfile",
+        "args": {
+          "E2E_SECRET": "uid"
+        },
+        "labels": {
+          "E2E_SECRET": "label"
+        },
+        "secrets": [
+          {
+            "source": "E2E_SECRET"
+          }
+        ]
+      },
+      "command": [
+        "sleep",
+        "infinity"
+      ],
+      "environment": {
+        "E2E_OTHER": "x",
+        "HOME": "/tmp",
+        "JIG_BASE": "0123"
+      },
+      "image": "acme-shop-jig",
+      "labels": {
+        "E2E_SECRET": "service label"
+      },
+      "networks": {
+        "default": null
+      }
+    },
+    "db.1": {
+      "environment": {}
+    },
+    "worker": {
+      "build": {
+        "context": "/srv/profile/.jig"
+      },
+      "environment": {
+        "MULTI": "a\nb \"E2E_SECRET\": x"
+      }
+    }
+  }
+}
+EOF
+sed 's/"HOME": "\/tmp",/"E2E_SECRET": "@E2E_SECRET@",\
+        "HOME": "\/tmp",/' "$tmp/compose/build.json" >"$tmp/compose/env_name.json"
+sed 's/"HOME": "\/tmp",/"TOKEN": "x@E2E_SECRET@y",/' "$tmp/compose/build.json" >"$tmp/compose/env_value.json"
+sed 's/"E2E_SECRET": "uid"/"UID": "@E2E_SECRET@"/' "$tmp/compose/build.json" >"$tmp/compose/arg_value.json"
+sed 's/"HOME": "\/tmp",/"OTHER_TOKEN": "real:$$v\/\\u0026\\u003c\\"x\\\\1\\u003e",/' "$tmp/compose/build.json" >"$tmp/compose/value_go.json"
+sed 's/"HOME": "\/tmp",/"OTHER_TOKEN": "real:$v\/\&<\\"x\\\\1>",/' "$tmp/compose/build.json" >"$tmp/compose/value_json.json"
+sed 's/"E2E_SECRET": "service label"/"KEY": "a real-E2E_KEY-value b"/' "$tmp/compose/build.json" >"$tmp/compose/value_raw.json"
+sed 's/"HOME": "\/tmp",/"OTHER_TOKEN": "real:$$v\/\\u0026\\u003c\\"x\\\\2\\u003e real:$v\/\&<\\"x\\\\2> real-E2E_KEY-valu",/' "$tmp/compose/build.json" >"$tmp/compose/value_near.json"
+sed '/"worker": {/,/^    }$/d; s/^    "db.1": {/    "worker": {/; /^      "build": {/,/^      },$/d' "$tmp/compose/build.json" >"$tmp/compose/no_build.json"
+sed 's/"app": {/"web": {/' "$tmp/compose/build.json" >"$tmp/compose/no_app.json"
+sed -e 's/^  "name": "jig-run_acme_shop_x",$/  "configs": {\
+    "c_key": {\
+      "name": "jig-run_acme_shop_x_c_key",\
+      "environment": "E2E_KEY"\
+    },\
+    "c_other": {\
+      "name": "jig-run_acme_shop_x_c_other",\
+      "environment": "E2E_OTHER"\
+    }\
+  },\
+&/' -e 's/^      "environment": "E2E_SECRET"$/&\
+    },\
+    "s_other": {\
+      "name": "jig-run_acme_shop_x_s_other",\
+      "environment": "E2E_OTHER"\
+    },\
+    "s_file": {\
+      "name": "jig-run_acme_shop_x_s_file",\
+      "file": "\/srv\/E2E_SECRET"/' -e 's/^      "image": "acme-shop-jig",$/&\
+      "secrets": [\
+        {\
+          "source": "s_other",\
+          "target": "\/run\/secrets\/s_other"\
+        },\
+        {\
+          "source": "s_file",\
+          "target": "\/run\/secrets\/s_file"\
+        }\
+      ],/' -e 's/^    "db.1": {$/&\
+      "configs": [\
+        {\
+          "source": "c_other"\
+        }\
+      ],/' "$tmp/compose/build.json" >"$tmp/compose/runtime.json"
+sed 's/"source": "s_other",/"source": "E2E_SECRET",/' "$tmp/compose/runtime.json" >"$tmp/compose/runtime_secret.json"
+sed '/^    "db.1": {$/,/^    }/s/"source": "c_other"/"source": "c_key"/' "$tmp/compose/runtime.json" >"$tmp/compose/runtime_config.json"
+sed 's/"db.1": {/"db 1": {/' "$tmp/compose/build.json" >"$tmp/compose/bad_name.json"
+sed 's/"services": {/"services":{/' "$tmp/compose/build.json" >"$tmp/compose/no_services.json"
+docker() {
+  printf '%s|E2E_SECRET=%s\n' "$*" "${E2E_SECRET-unset}" >>"$tmp/docker.calls"
+  case "$1 ${*: -3}" in
+    "compose config --format json")
+      [ -z "${config_err-}" ] || printf '%s\n' "$config_err" >&2
+      [ "$fixture" != fail ] || return 1
+      config_text="$(cat "$tmp/compose/$fixture.json")"
+      printf '%s\n' "${config_text//@E2E_SECRET@/${E2E_SECRET-}}" ;;
+    *) return 1 ;;
+  esac
+}
+inspect() {
+  rm -f "$tmp/docker.calls" "$tmp/compose/compose.build.yml"
+  (
+    jig_project=jig-run_acme_shop_x gh_repo=acme/shop
+    jig_compose_files=(-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml)
+    read -r -a profile_build_secrets <<<"${inspect_names-E2E_SECRET E2E_KEY}"
+    jig_build_values=()
+    for name in "${profile_build_secrets[@]}"; do
+      case "$name" in
+        E2E_SECRET) jig_build_values+=('real:$v/&<"x\1>') ;;
+        *) jig_build_values+=("real-$name-value") ;;
+      esac
+    done
+    if jig_check_compose "$tmp/compose"; then
+      printf 'ok|%s|%s' "${jig_build_services[*]-}" "${jig_compose_files[*]}"
+    else
+      printf 'refused|%s' "$jig_compose_problem"
+    fi
+  ) 2>&1
+}
+fixture=build
+equals "services that build are found and get jig's label file" "$(inspect)" \
+  "ok|app worker|-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml -f $tmp/compose/compose.build.yml"
+equals "the config is read with markers in place of the build secrets' values" "$(cat "$tmp/docker.calls")" \
+  "compose -p jig-run_acme_shop_x -f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml config --format json|E2E_SECRET=jig_build_secret_marker_E2E_SECRET_end"
+equals "jig's file labels each service that builds with the repository, never pulls its image and names the image of one the profile leaves unnamed" \
+  "$(cat "$tmp/compose/compose.build.yml")" 'services:
+  "app":
+    pull_policy: never
+    build:
+      labels:
+        jig.repo: "acme/shop"
+  "worker":
+    pull_policy: never
+    image: "jig-acme_shop-worker"
+    build:
+      labels:
+        jig.repo: "acme/shop"'
+image_names() {
+  local service
+  for service in "$@"; do
+    jig_image_name "$service"
+    echo
+  done
+}
+equals "an image name keeps lowercase names and turns others into lowercase, digits and dashes with a checksum of the original" \
+  "$(gh_repo=Acme.Inc/My_Repo image_names app Web.API Web-API _ db-1)" \
+  "jig-acme-inc-2169544754_my-repo-3261712207-app
+jig-acme-inc-2169544754_my-repo-3261712207-web-api-1602141869
+jig-acme-inc-2169544754_my-repo-3261712207-web-api-2221479482
+jig-acme-inc-2169544754_my-repo-3261712207-397289535
+jig-acme-inc-2169544754_my-repo-3261712207-db-1"
+equals "image names are valid Docker repository names" \
+  "$( (gh_repo=x/.-_ image_names A -a- a..b 9; gh_repo=x/.github image_names a) | LC_ALL=C grep -c -v -E '^[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*$')" 0
+config_err='failed to read /srv/.env: line 2: unexpected character "real-E2E_KEY-value", not real-E2E_KEY-valu' fixture=fail
+equals "docker compose config's messages, an error quoting an env_file line for example, reach the terminal with the secret values redacted" \
+  "$(jig_secret_names=() jig_secret_values=() && jig_add_secret E2E_KEY real-E2E_KEY-value && inspect)" \
+  "failed to read /srv/.env: line 2: unexpected character \"[REDACTED]\", not real-E2E_KEY-valu
+refused|docker compose config failed on the profile's compose files and jig's"
+unset config_err
+fixture=no_build
+equals "without a service that builds there is no label file" "$(inspect; [ -e "$tmp/compose/compose.build.yml" ] && echo ' file')" \
+  "ok||-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml"
+fixture=env_name
+equals "a build secret's name in a service's environment is refused" "$(inspect)" \
+  "refused|the build secret E2E_SECRET is in the environment of the service app (docker compose config): jig never passes a build secret into a container. Remove it from the service's environment and env_file; the build gets it from a top-level secret with environment: E2E_SECRET"
+fixture=env_value
+equals "a build secret's value in another variable is refused" "$(inspect)" \
+  "refused|the value of the build secret E2E_SECRET reaches the compose project (docker compose config resolves \${E2E_SECRET} in it: in an environment value, a build arg, a label or elsewhere): jig never passes a build secret into a container. The build gets it from a top-level secret with environment: E2E_SECRET"
+equals "a build secret whose name starts another's is not named for the other's marker" "$(inspect_names='E2E_SEC E2E_SECRET' inspect | cut -d: -f1)" \
+  "refused|the value of the build secret E2E_SECRET reaches the compose project (docker compose config resolves \${E2E_SECRET} in it"
+fixture=arg_value
+equals "a build secret's value in a build arg is refused" "$(inspect | cut -d: -f1)" \
+  "refused|the value of the build secret E2E_SECRET reaches the compose project (docker compose config resolves \${E2E_SECRET} in it"
+fixture=runtime
+equals "runtime secrets and configs that take no build secret pass" "$(inspect)" \
+  "ok|app worker|-f /srv/profile/.jig/compose.yml -f /srv/compose.profile.yml -f $tmp/compose/compose.build.yml"
+fixture=runtime_secret
+equals "a runtime secret that takes a build secret is refused" "$(inspect)" \
+  "refused|the build secret E2E_SECRET reaches the service app as its runtime secret E2E_SECRET (the top-level secret E2E_SECRET takes environment: E2E_SECRET): jig never passes a build secret into a container. Remove E2E_SECRET from the service's secrets; the build gets it under build: secrets:"
+fixture=runtime_config
+equals "a config that takes a build secret is refused" "$(inspect)" \
+  "refused|the build secret E2E_KEY reaches the service db.1 as its runtime config c_key (the top-level config c_key takes environment: E2E_KEY): jig never passes a build secret into a container. Remove c_key from the service's configs; the build gets it under build: secrets:"
+fixture=value_go
+equals "a build secret's value in the config as compose writes it, \$ doubled and JSON-escaped, from an env_file for example, is refused" "$(inspect)" \
+  "refused|the value of the build secret E2E_SECRET is in the compose project that docker compose config resolves (an env_file or another variable holds it): jig never passes a build secret into a container. Remove the value from there; the build gets it from a top-level secret with environment: E2E_SECRET"
+fixture=value_json
+equals "a build secret's value in the config with only its backslash and quote escaped and a single \$ is refused" "$(inspect | cut -d'(' -f1)" \
+  "refused|the value of the build secret E2E_SECRET is in the compose project that docker compose config resolves "
+fixture=value_raw
+equals "a build secret's value as it is, in a label, is refused" "$(inspect | cut -d'(' -f1)" \
+  "refused|the value of the build secret E2E_KEY is in the compose project that docker compose config resolves "
+fixture=value_near
+equals "near misses of the values pass" "$(inspect | cut -d'|' -f1)" ok
+equals "a search that fails is refused" "$(grep() { return 2; } && inspect)" \
+  "refused|could not search docker compose config for the build secrets' values"
+fixture=no_app
+equals "a project without the app service is refused" "$(inspect)" "refused|docker compose config shows no service app"
+fixture=bad_name
+equals "a service name out of shape is refused" "$(inspect)" "refused|could not read the services from docker compose config --format json"
+fixture=no_services
+equals "a config without the services block is refused" "$(inspect)" "refused|could not read the services from docker compose config --format json"
+fixture=fail
+equals "a failing docker compose config is refused" "$(inspect)" "refused|docker compose config failed on the profile's compose files and jig's"
+unset fixture config_text
+
+docker() {
+  printf '%s%s\n' "$*" "$( [ "${NPM_TOKEN-}" != "$secret" ] || printf ' (NPM_TOKEN set)')" >>"$tmp/docker.calls"
+  case "$1 $2" in
+    "compose -p")
+      printf 'build step 1\nbuild sees %s\n' "$secret"
+      return "$build_status" ;;
+    "image prune")
+      [ "$prune" != fail ] || { echo "prune failed"; return 1; }
+      [ "$prune" = none ] || printf 'Deleted Images:\ndeleted: sha256:0123\n\n'
+      echo "Total reclaimed space: 1.5MB" ;;
+    *) return 1 ;;
+  esac
+}
+build() {
+  rm -f "$tmp/docker.calls" "$tmp/compose/build.log"
+  (
+    jig_project=jig-run_acme_shop_x gh_repo=acme/shop jig_builder_text="desktop-linux, the builder of the Docker context"
+    jig_compose_files=(-f /srv/compose.yml)
+    jig_secret_names=(NPM_TOKEN) jig_secret_values=("$secret")
+    profile_build_secrets=(NPM_TOKEN) jig_build_values=("$secret")
+    jig_build_services=("$@")
+    jig_build "$tmp/compose/build.log"
+    echo "status $?"
+    [ -z "${NPM_TOKEN+set}" ] || echo "NPM_TOKEN stays set after the build"
+  ) 2>&1
+}
+build_status=0 prune=some
+equals "the build runs with the redacted output on the terminal, then prunes" "$(build app worker)" \
+  "jig: building app worker with desktop-linux, the builder of the Docker context (log: $tmp/compose/build.log)
+build step 1
+build sees [REDACTED]
+jig: removed the dangling images labelled jig.repo=acme/shop (reclaimed 1.5MB)
+status 0"
+equals "docker builds the project with the build secret in its environment and prunes only the repository's dangling images without it" \
+  "$(cat "$tmp/docker.calls")" \
+  "compose -p jig-run_acme_shop_x -f /srv/compose.yml build (NPM_TOKEN set)
+image prune -f --filter label=jig.repo=acme/shop"
+equals "build.log has the redacted build output and the prune output" "$(cat "$tmp/compose/build.log")" "build step 1
+build sees [REDACTED]
+Deleted Images:
+deleted: sha256:0123
+
+Total reclaimed space: 1.5MB"
+equals "without a service that builds nothing runs and no build.log is written" \
+  "$(build; cat "$tmp/docker.calls" 2>/dev/null; [ -e "$tmp/compose/build.log" ] && echo log)" "status 0"
+prune=none
+equals "a prune that removes nothing is not announced" "$(build app | sed -n '4,$p')" "status 0"
+prune=fail
+equals "a failing prune is a warning" "$(build app | sed -n '4,$p')" \
+  "jig: WARNING: could not remove the dangling images of acme/shop (docker image prune): see $tmp/compose/build.log
+status 0"
+equals "the prune's error is in build.log" "$(tail -n 1 "$tmp/compose/build.log")" "prune failed"
+build_status=17 prune=some
+equals "a failing build returns its code and prunes nothing" "$(build app | tail -n 1; cat "$tmp/docker.calls")" "status 17
+compose -p jig-run_acme_shop_x -f /srv/compose.yml build (NPM_TOKEN set)"
+unset -f docker
+unset build_status prune
+
+mkdir "$tmp/argv" "$tmp/argv-run"
+for command in awk cat cksum cut env grep head mv rm sed sort tail tee tr wc; do
+  real="$(command -v "$command")" || continue
+  printf '#!/bin/sh\nprintf "%%s\\n" "%s $*" >>"%s/argv.log"\nexec "%s" "$@"\n' "$command" "$tmp" "$real" >"$tmp/argv/$command"
+  chmod +x "$tmp/argv/$command"
+done
+docker() {
+  printf 'docker %s\n' "$*" >>"$tmp/argv.log"
+  case "$1 ${*: -1}" in
+    "compose json") cat "$tmp/compose/build.json" ;;
+    "compose build") printf 'build sees %s\n' "${E2E_ARGV-}" ;;
+    "image label=jig.repo=acme/shop") printf 'Deleted Images:\nTotal reclaimed space: 1B\n' ;;
+    *) return 1 ;;
+  esac
+}
+argv_token=e2e0argv0credential0value
+argv_value='acme:ghp_argv/x&y"z\1'
+printf 'token %s\nvalue %s\nclean\n' "$argv_token" "$argv_value" >"$tmp/argv-run/a.log"
+(
+  PATH="$tmp/argv:$PATH"
+  jig_secret_names=() jig_secret_values=()
+  jig_add_secret CLAUDE_CODE_OAUTH_TOKEN "$argv_token"
+  export E2E_ARGV="$argv_value"
+  profile_build_secrets=(E2E_ARGV)
+  jig_read_build_secrets
+  jig_contains_secret "$tmp/argv-run/a.log"
+  jig_secrets_in "$tmp/argv-run/a.log"
+  jig_redact_text "x $argv_value"
+  printf 'x %s\n' "$argv_value" | jig_redact_stream
+  jig_redact_files "$tmp/argv-run" a.log
+  jig_project=jig-run_acme_shop_x gh_repo=acme/shop jig_builder_text=desktop-linux jig_compose_files=(-f /srv/compose.yml)
+  jig_check_compose "$tmp/argv-run" && jig_build "$tmp/argv-run/build.log"
+) >"$tmp/argv-run/out" 2>&1
+unset -f docker
+equals "the scan, the redaction, the compose check and the build ran grep, awk, sed, tee and docker" \
+  "$(for command in grep awk sed tee docker; do grep -c "^$command " "$tmp/argv.log" | sed "s/^0$/no $command/;s/^[0-9]*$/$command/"; done | tr '\n' ' ')" \
+  "grep awk sed tee docker "
+equals "no secret value is on the command line of a command they run, the credential's included" \
+  "$(LC_ALL=C grep -c -F -f <(printf '%s\n' "$argv_token" "$argv_value" 'acme:ghp_argv/x&y\"z\\1') "$tmp/argv.log")" 0
 
 echo "$checks checks, $failures failed"
 [ "$failures" = 0 ]
